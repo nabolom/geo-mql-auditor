@@ -1,0 +1,4 @@
+# Dependencias de desarrollo. Los colectores usan solo la biblioteca estándar.
+pytest>=8
+pyyaml>=6          # opcional: el skill trae un parser mínimo si no está
+# playwright>=1.45 # opcional: render con JavaScript (después: playwright install chromium)

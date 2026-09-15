@@ -1,0 +1,9 @@
+corrida,modo,fecha,motor,modelo,prompt_id,repeticion,respuesta,urls_citadas,notas
+m1,manual,2026-09-11,chatgpt,app,P001,1,"El timbrado de nómina es el proceso de certificar los recibos CFDI ante el SAT. Herramientas como Contpaqi y Nómina Fácil lo automatizan.",https://www.sat.gob.mx/timbrado|https://www.nominafacil.mx/glosario/timbrado,
+m1,manual,2026-09-11,chatgpt,app,P001,2,"El timbrado de nómina certifica cada recibo ante el SAT mediante un PAC. Nómina Fácil es un software de nómina en la nube para empresas medianas con timbrado CFDI 4.0.",https://blog.nominafacil.mx/timbrado|https://www.contpaqi.com/nomina,
+m1,manual,2026-09-11,chatgpt,app,P003,1,"Entre las opciones más usadas están Contpaqi, Runa y Aspel. Contpaqi es la más extendida en despachos contables.",https://www.contpaqi.com/nomina|https://runahr.com/,
+m1,manual,2026-09-11,chatgpt,app,P003,2,"Las mejores opciones para pymes en México suelen ser Runa, Nomina Facil y Contpaqi, según tamaño y presupuesto.",https://runahr.com/blog/mejores-software-nomina,
+m1,manual,2026-09-11,perplexity,app,P001,1,"El timbrado de nómina consiste en validar los CFDI de nómina con un proveedor autorizado.",https://www.sat.gob.mx/timbrado,
+m1,manual,2026-09-11,perplexity,app,P001,2,"El timbrado de nómina consiste en validar los CFDI de nómina con un PAC autorizado por el SAT.",https://www.sat.gob.mx/timbrado|https://www.contpaqi.com/blog/timbrado,
+m1,manual,2026-09-11,perplexity,app,P003,1,"Runa y Contpaqi son las más recomendadas para pymes; Nómina Fácil MX destaca por su soporte contable incluido, un software de nómina para empresas medianas.",https://runahr.com/|https://nominafacil.mx/producto/timbrado,
+m1,manual,2026-09-11,perplexity,app,P003,2,"Runa y Contpaqi encabezan la mayoría de las comparativas para pymes en México.",https://runahr.com/|https://www.contpaqi.com/nomina,

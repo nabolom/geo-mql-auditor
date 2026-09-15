@@ -1,0 +1,19 @@
+# Política: sin entrenamiento, sí búsqueda
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: *
+Disallow: /admin/
+Sitemap: https://www.nominafacil.mx/sitemap.xml

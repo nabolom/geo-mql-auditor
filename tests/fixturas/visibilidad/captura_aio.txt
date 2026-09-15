@@ -1,0 +1,37 @@
+CAPTURA MANUAL · GOOGLE AI OVERVIEWS · CORRIDA m2
+=================================================
+
+CÓMO CAPTURAR
+1. Abre una ventana de incógnito.
+
+=================================================
+
+### P001
+PREGUNTA: ¿Qué es el timbrado de nómina en México?
+RESPUESTA: El timbrado de nómina es la certificación de cada recibo ante el SAT. [1] (/goto?url=CAES1abc) Nómina Fácil es un software de nómina en la nube para empresas medianas. [2] (/goto?url=CAES2def)
+
+URLS: https://www.google.com/goto?url=CAES1abc
+
+https://www.google.com/goto?url=CAES2def
+
+https://www.sat.gob.mx/timbrado
+
+NOTAS:
+
+---
+
+### P002
+PREGUNTA: ¿Cómo calculo un finiquito?
+RESPUESTA: SIN_AIO
+URLS:
+NOTAS: No apareció resumen de IA; solo resultados orgánicos.
+
+---
+
+### P003
+PREGUNTA: ¿Cuál es el mejor software de nómina para pymes en México?
+RESPUESTA: Entre las opciones más mencionadas están Contpaqi, Runa y Aspel.
+URLS:
+NOTAS:
+
+---

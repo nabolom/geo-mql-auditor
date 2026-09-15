@@ -1,0 +1,13 @@
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "@id": "{{url}}#article",
+  "mainEntityOfPage": "{{url}}",
+  "headline": "{{h1}}",
+  "image": "[DATO REQUERIDO: URL de la imagen principal visible en la página]",
+  "datePublished": "{{datePublished}}",
+  "dateModified": "{{dateModified}}",
+  "inLanguage": "{{idioma}}",
+  "author": {"@type": "Person", "@id": "{{url_autor}}#person", "name": "{{autor}}", "jobTitle": "[DATO REQUERIDO: cargo visible en la byline]", "url": "{{url_autor}}"},
+  "publisher": {"@id": "https://{{dominio}}/#org"}
+}

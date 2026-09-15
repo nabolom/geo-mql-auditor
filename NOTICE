@@ -1,0 +1,53 @@
+NOTICE — geo-mql-auditor
+
+Este proyecto reutiliza y adapta código del proyecto best-aeo-skill
+(https://github.com/metawhisp/best-aeo-skill), publicado bajo licencia MIT.
+Se conserva el aviso de copyright y el texto de la licencia conforme a sus
+términos.
+
+--------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 bestaeoskill
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+--------------------------------------------------------------------------
+
+Archivos de este proyecto derivados de best-aeo-skill/scripts/
+(ruta en geo-mql-auditor -> archivo de origen):
+
+  .claude/skills/geo-mql-auditor/scripts/geomql/fetch.py         <- fetch_page.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/robots.py        <- robots_check.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/bots.py          <- ai_bot_access.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/schema.py        <- schema_validate.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/estadisticas.py  <- statistic_density.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/citas.py         <- quote_extractor.py, citation_check.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/frescura.py      <- freshness_check.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/entidad.py       <- entity_extractor.py, author_check.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/llmstxt.py       <- llms_txt_check.py
+  .claude/skills/geo-mql-auditor/scripts/geomql/hallazgos.py     <- audit.py (dataclasses y orquestación)
+  .claude/skills/geo-mql-auditor/scripts/audit.py                <- audit.py (estructura del CLI)
+
+Lo que NO se reutiliza de best-aeo-skill, por decisión de diseño documentada en
+README.md (sección "Licencia y atribución"): el rulebook
+"The 100 Rules", sus estadísticas, sus pesos por perfil, los frameworks
+CORE-EEAT y CITE, y sus afirmaciones sobre el paper de Princeton, AutoGEO,
+C-SEO Bench, FAQPage y llms.txt.
+
+Todo el código nuevo de geo-mql-auditor se distribuye igualmente bajo MIT.

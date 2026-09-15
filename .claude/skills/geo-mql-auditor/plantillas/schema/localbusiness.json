@@ -1,0 +1,12 @@
+{
+  "@context": "https://schema.org",
+  "@type": "LocalBusiness",
+  "@id": "{{url}}#local",
+  "name": "{{nombre_sucursal}}",
+  "url": "{{url}}",
+  "parentOrganization": {"@id": "https://{{dominio}}/#org"},
+  "address": {"@type": "PostalAddress", "streetAddress": "{{calle}}", "addressLocality": "{{ciudad}}", "addressRegion": "{{estado}}", "postalCode": "{{cp}}", "addressCountry": "MX"},
+  "telephone": "{{telefono}}",
+  "openingHoursSpecification": [{"@type": "OpeningHoursSpecification", "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], "opens": "[DATO REQUERIDO]", "closes": "[DATO REQUERIDO]"}],
+  "geo": {"@type": "GeoCoordinates", "latitude": "[DATO REQUERIDO]", "longitude": "[DATO REQUERIDO]"}
+}

@@ -1,0 +1,34 @@
+#
+# robots.txt de un sitio Drupal con las reglas por defecto del CMS.
+# No declara la directiva Sitemap: aunque /sitemap.xml existe.
+#
+
+User-agent: *
+# CSS, JS, Images
+Allow: /core/*.css$
+Allow: /core/*.js$
+Allow: /core/*.png
+Allow: /core/*.svg
+Allow: /themes/*.css$
+Allow: /themes/*.js$
+# Directories
+Disallow: /core/
+Disallow: /profiles/
+# Files
+Disallow: /README.txt
+Disallow: /web.config
+# Paths (clean URLs)
+Disallow: /admin/
+Disallow: /comment/reply/
+Disallow: /filter/tips
+Disallow: /node/add/
+Disallow: /search/
+Disallow: /user/register
+Disallow: /user/password
+Disallow: /user/login
+Disallow: /user/logout
+Disallow: /media/oembed
+# Paths (no clean URLs)
+Disallow: /index.php/admin/
+Disallow: /index.php/search/
+Disallow: /index.php/user/login

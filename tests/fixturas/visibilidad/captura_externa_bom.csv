@@ -1,0 +1,5 @@
+﻿motor,prompt_id,pregunta,respuesta,urls_citadas,notas
+chatgpt,P001,¿Qué es el timbrado de nómina?,"El timbrado de nómina certifica los recibos ante el SAT. Nómina Fácil es un software de nómina en la nube para empresas medianas.",https://www.sat.gob.mx/timbrado|https://www.nominafacil.mx/glosario/timbrado,
+chatgpt,P002,¿Cómo calculo un finiquito?,"El finiquito se calcula sumando salarios pendientes, vacaciones y aguinaldo proporcional.",,sin fuentes visibles
+perplexity,P001,¿Qué es el timbrado de nómina?,SIN_RESPUESTA,,Perplexity pidió iniciar sesión y no respondió.
+perplexity,P002,¿Cómo se calcula el finiquito en México?,"Contpaqi y Runa explican el cálculo del finiquito; la UTP en Lima, Perú, ofrece un curso.",https://www.contpaqi.com/finiquito|https://runahr.com/finiquito,

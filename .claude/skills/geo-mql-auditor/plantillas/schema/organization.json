@@ -1,0 +1,12 @@
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "@id": "https://{{dominio}}/#org",
+  "name": "{{nombre}}",
+  "url": "https://{{dominio}}/",
+  "logo": "[DATO REQUERIDO: URL del logotipo]",
+  "description": "{{descripcion_oficial}}",
+  "sameAs": ["[DATO REQUERIDO: URL de LinkedIn]", "[DATO REQUERIDO: URL de YouTube u otro perfil oficial]"],
+  "address": {"@type": "PostalAddress", "streetAddress": "[DATO REQUERIDO]", "addressLocality": "[DATO REQUERIDO]", "addressRegion": "[DATO REQUERIDO]", "postalCode": "[DATO REQUERIDO]", "addressCountry": "MX"},
+  "contactPoint": {"@type": "ContactPoint", "contactType": "sales", "telephone": "[DATO REQUERIDO]", "email": "[DATO REQUERIDO]"}
+}

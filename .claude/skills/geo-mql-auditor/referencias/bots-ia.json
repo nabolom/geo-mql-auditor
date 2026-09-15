@@ -1,0 +1,54 @@
+{
+  "verificado_el": "2026-09-10",
+  "categorias": {
+    "busqueda": "Indexa para mostrar y citar el sitio en respuestas de búsqueda con IA. Bloquearlo sí afecta la visibilidad.",
+    "usuario": "Descarga una página a petición de un usuario en tiempo real. Varios ignoran robots.txt por diseño; bloquearlos vía WAF reduce visibilidad en respuestas en tiempo real.",
+    "entrenamiento": "Recolecta contenido para entrenar modelos. Bloquearlo es decisión de política; los proveedores declaran que no afecta la aparición en búsqueda.",
+    "otro": "Sin relación directa con visibilidad en respuestas de IA.",
+    "no_documentado": "Token legado o sin documentación oficial; incluirlo en robots.txt es inocuo pero no cubre nada documentado."
+  },
+  "bots": [
+    {"token": "OAI-SearchBot", "proveedor": "OpenAI", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developers.openai.com/api/docs/bots", "nota": "Si se bloquea, el sitio no aparece en las respuestas de ChatGPT search, aunque puede aparecer como enlace de navegación."},
+    {"token": "ChatGPT-User", "proveedor": "OpenAI", "categoria": "usuario", "respeta_robots": false, "es_token_de_control": false, "fuente": "https://developers.openai.com/api/docs/bots", "nota": "Fetch iniciado por un usuario; 'robots.txt rules may not apply'. No determina la aparición en búsqueda."},
+    {"token": "GPTBot", "proveedor": "OpenAI", "categoria": "entrenamiento", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developers.openai.com/api/docs/bots", "nota": "Disallow significa que el contenido no debe usarse en entrenamiento."},
+    {"token": "OAI-AdsBot", "proveedor": "OpenAI", "categoria": "otro", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developers.openai.com/api/docs/bots", "nota": "Valida páginas de destino de anuncios."},
+
+    {"token": "Claude-SearchBot", "proveedor": "Anthropic", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://support.claude.com/en/articles/8896518", "nota": "'navigates the web to improve search result quality for users'."},
+    {"token": "Claude-User", "proveedor": "Anthropic", "categoria": "usuario", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://support.claude.com/en/articles/8896518", "nota": "Anthropic aplica la frase de cumplimiento de robots.txt a los tres bots sin excepción. Bloquearlo 'may reduce your site's visibility for user-directed web search'."},
+    {"token": "ClaudeBot", "proveedor": "Anthropic", "categoria": "entrenamiento", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://support.claude.com/en/articles/8896518", "nota": "Contenido que 'could potentially contribute to their training'."},
+    {"token": "anthropic-ai", "proveedor": "Anthropic", "categoria": "no_documentado", "respeta_robots": null, "es_token_de_control": false, "fuente": "https://support.claude.com/en/articles/8896518", "nota": "Ausente del artículo oficial (token legado)."},
+    {"token": "Claude-Web", "proveedor": "Anthropic", "categoria": "no_documentado", "respeta_robots": null, "es_token_de_control": false, "fuente": "https://support.claude.com/en/articles/8896518", "nota": "Ausente del artículo oficial (token legado)."},
+
+    {"token": "Googlebot", "proveedor": "Google", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers", "nota": "AI Overviews y AI Mode se alimentan del índice de Search; se controlan con nosnippet, max-snippet, data-nosnippet y noindex."},
+    {"token": "Google-Extended", "proveedor": "Google", "categoria": "entrenamiento", "respeta_robots": true, "es_token_de_control": true, "fuente": "https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers", "nota": "Token de control, no un user-agent. Gobierna entrenamiento y grounding en Gemini Apps y Vertex AI. 'Does not impact a site's inclusion in Google Search nor is it used as a ranking signal'."},
+    {"token": "GoogleOther", "proveedor": "Google", "categoria": "otro", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers", "nota": "Crawler genérico de equipos de producto."},
+    {"token": "Google-CloudVertexBot", "proveedor": "Google", "categoria": "otro", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers", "nota": "Rastreos pedidos por el propio dueño del sitio para agentes de Vertex AI."},
+
+    {"token": "PerplexityBot", "proveedor": "Perplexity", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://docs.perplexity.ai/guides/bots", "nota": "'surface and link websites in search results on Perplexity. It is not used to crawl content for AI foundation models'."},
+    {"token": "Perplexity-User", "proveedor": "Perplexity", "categoria": "usuario", "respeta_robots": false, "es_token_de_control": false, "fuente": "https://docs.perplexity.ai/guides/bots", "nota": "'Since a user requested the fetch, this fetcher generally ignores robots.txt rules'."},
+
+    {"token": "Applebot", "proveedor": "Apple", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://support.apple.com/en-us/119829", "nota": "Spotlight, Siri y Safari. Sin regla propia sigue las reglas de Googlebot."},
+    {"token": "Applebot-Extended", "proveedor": "Apple", "categoria": "entrenamiento", "respeta_robots": true, "es_token_de_control": true, "fuente": "https://support.apple.com/en-us/119829", "nota": "Token de opt-out de entrenamiento; 'does not crawl webpages'. Bloquearlo no afecta Spotlight, Siri ni Safari."},
+
+    {"token": "bingbot", "proveedor": "Microsoft", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://www.bing.com/webmasters/help/which-crawlers-does-bing-use-8c184ec0", "nota": "Copilot no tiene user-agent propio; se controla con meta bingbot nocache/noarchive (blog Bing Webmaster 2023-09-22)."},
+
+    {"token": "Meta-WebIndexer", "proveedor": "Meta", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers", "nota": "'improve Meta AI search result quality'; permitirlo 'helps us cite and link to your content in Meta AI's responses'."},
+    {"token": "Meta-ExternalFetcher", "proveedor": "Meta", "categoria": "usuario", "respeta_robots": false, "es_token_de_control": false, "fuente": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers", "nota": "'may bypass robots.txt because it performs fetches that were requested by the user'."},
+    {"token": "Meta-ExternalAgent", "proveedor": "Meta", "categoria": "entrenamiento", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers", "nota": "'training foundation AI models or improving products by indexing content directly'."},
+    {"token": "facebookexternalhit", "proveedor": "Meta", "categoria": "otro", "respeta_robots": false, "es_token_de_control": false, "fuente": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers", "nota": "Vistas previas de enlaces compartidos."},
+    {"token": "FacebookBot", "proveedor": "Meta", "categoria": "no_documentado", "respeta_robots": null, "es_token_de_control": false, "fuente": "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers", "nota": "Ya no aparece en la documentación oficial."},
+
+    {"token": "DuckAssistBot", "proveedor": "DuckDuckGo", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://duckduckgo.com/duckduckgo-help-pages/results/duckassistbot/", "nota": "Búsqueda en tiempo real para respuestas de IA; 'not used in any way to train AI models'."},
+    {"token": "Amzn-SearchBot", "proveedor": "Amazon", "categoria": "busqueda", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developer.amazon.com/amazonbot", "nota": "Búsqueda (Alexa); no entrena modelos."},
+    {"token": "Amzn-User", "proveedor": "Amazon", "categoria": "usuario", "respeta_robots": false, "es_token_de_control": false, "fuente": "https://developer.amazon.com/amazonbot", "nota": "'may not follow all robots.txt directives'."},
+    {"token": "Amazonbot", "proveedor": "Amazon", "categoria": "entrenamiento", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://developer.amazon.com/amazonbot", "nota": "'may be used to train Amazon AI models'."},
+    {"token": "MistralAI-User", "proveedor": "Mistral", "categoria": "usuario", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://docs.mistral.ai/robots/", "nota": "Fetch por acciones de usuario; no entrena."},
+    {"token": "CCBot", "proveedor": "Common Crawl", "categoria": "entrenamiento", "respeta_robots": true, "es_token_de_control": false, "fuente": "https://commoncrawl.org/ccbot", "nota": "Repositorio abierto de rastreo; la documentación no menciona IA, pero terceros entrenan con sus datos."},
+    {"token": "Bytespider", "proveedor": "ByteDance", "categoria": "no_documentado", "respeta_robots": null, "es_token_de_control": false, "fuente": "", "nota": "Sin documentación oficial accesible."},
+    {"token": "cohere-ai", "proveedor": "Cohere", "categoria": "no_documentado", "respeta_robots": null, "es_token_de_control": false, "fuente": "https://docs.cohere.com/docs/cohere-web-crawlers", "nota": "Cohere declara que no rastrea con este token; reserva 'Coherebot' para el futuro."}
+  ],
+  "controles_no_robots": [
+    {"motor": "Google AI Overviews / AI Mode", "control": "meta robots nosnippet, max-snippet, data-nosnippet, noindex", "fuente": "https://developers.google.com/search/docs/appearance/ai-features"},
+    {"motor": "Microsoft Copilot / Bing", "control": "meta bingbot nocache (solo URL, título y snippet) o noarchive (excluido de respuestas y de entrenamiento)", "fuente": "https://blogs.bing.com/webmaster/september-2023/Announcing-new-options-for-webmasters-to-control-their-content-in-Bing-Chat"}
+  ]
+}

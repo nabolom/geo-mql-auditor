@@ -1,0 +1,1652 @@
+# Rulebook de geo-mql-auditor. Verificado el 2026-09-10.
+# Fuerza: A = documentación oficial del motor o estudio revisado por pares;
+#         B = estudio de industria con metodología publicada; C = consenso o hipótesis.
+# tipo_evidencia: requisito_oficial | efecto_experimental | correlacional | consenso.
+# ambito: pagina | sitio | metodo | principio | analitica | crm | offpage | antipatron.
+# Las reglas de ámbito metodo, principio y antipatron no puntúan.
+# Formato restringido de YAML (ver scripts/geomql/reglas.py); cadenas entre comillas dobles.
+
+- id: T-01
+  categoria: tecnico
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "La URL responde 200 en su destino final, con un máximo de dos saltos de redirección y 301 para movimientos permanentes."
+  titulo_hallazgo: "Código HTTP o cadena de redirecciones inadecuada"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, HTTP status codes, network and DNS errors"
+      url: "https://developers.google.com/search/docs/crawling-indexing/http-network-errors"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Google sigue hasta 10 saltos; 301 es señal fuerte y 302 débil; los 4xx se retiran del índice."
+  verificado_el: "2026-09-10"
+  colector: tecnico.codigo_http
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Corrige el código de respuesta o acorta la cadena de redirecciones a un solo 301 hacia la URL canónica."
+
+- id: T-02
+  categoria: tecnico
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "robots.txt responde 200 o 404; un 5xx equivale a bloqueo total para crawlers conformes con RFC 9309."
+  titulo_hallazgo: "robots.txt no disponible o con error de servidor"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "RFC 9309, Robots Exclusion Protocol, sección 2.3.1"
+      url: "https://www.rfc-editor.org/rfc/rfc9309.html"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Con 5xx el crawler debe asumir disallow total; con 4xx puede acceder a todo."
+    - titulo: "Google Search Central, How Google interprets the robots.txt specification"
+      url: "https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Actualizado 2026-08-31."
+  verificado_el: "2026-09-10"
+  colector: robots.disponibilidad
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Asegura que /robots.txt devuelva 200 con reglas válidas o 404 si no se necesita."
+
+- id: T-03
+  categoria: tecnico
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "Los bots de búsqueda e índice de los motores de IA (OAI-SearchBot, Claude-SearchBot, PerplexityBot, Googlebot, bingbot, Applebot, Meta-WebIndexer) tienen acceso a las URLs que se quieren ver citadas."
+  titulo_hallazgo: "Bots de búsqueda de motores IA bloqueados en robots.txt"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "OpenAI, Overview of OpenAI crawlers"
+      url: "https://developers.openai.com/api/docs/bots"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Si se bloquea OAI-SearchBot el sitio no aparece en respuestas de ChatGPT search."
+    - titulo: "Anthropic, Does Anthropic crawl data from the web"
+      url: "https://support.claude.com/en/articles/8896518"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Perplexity, Crawlers"
+      url: "https://docs.perplexity.ai/guides/bots"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Meta, Web crawlers"
+      url: "https://developers.facebook.com/docs/sharing/webmasters/web-crawlers"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Apple, About Applebot"
+      url: "https://support.apple.com/en-us/119829"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: bots.acceso_busqueda
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Permite explícitamente los bots de búsqueda de IA en robots.txt y verifica que el CDN o WAF no los bloquee."
+
+- id: T-04
+  categoria: tecnico
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "Bloquear bots de entrenamiento (GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, Meta-ExternalAgent, Amazonbot, CCBot) es una decisión de política; los proveedores declaran que no afecta la aparición en búsqueda."
+  titulo_hallazgo: "Política de bots de entrenamiento sin definir"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "OpenAI, Overview of OpenAI crawlers"
+      url: "https://developers.openai.com/api/docs/bots"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Google Search Central, Google common crawlers (Google-Extended)"
+      url: "https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Google-Extended no afecta la inclusión en Search ni es señal de ranking."
+    - titulo: "Apple, About Applebot (Applebot-Extended)"
+      url: "https://support.apple.com/en-us/119829"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: bots.politica_entrenamiento
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: "legal o dirección"
+  horizonte: "30d"
+  recomendacion: "Decide y documenta si se permite el uso del contenido para entrenamiento; el skill nunca lo reporta como pérdida de visibilidad."
+
+- id: T-05
+  categoria: tecnico
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "Los fetchers disparados por usuarios (ChatGPT-User, Perplexity-User, Meta-ExternalFetcher) pueden ignorar robots.txt; solo se bloquean vía WAF o CDN y hacerlo reduce la visibilidad en respuestas en tiempo real."
+  titulo_hallazgo: "Fetchers por usuario bloqueados"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "OpenAI, Overview of OpenAI crawlers"
+      url: "https://developers.openai.com/api/docs/bots"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "ChatGPT-User: robots.txt rules may not apply."
+    - titulo: "Perplexity, Crawlers"
+      url: "https://docs.perplexity.ai/guides/bots"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Perplexity-User generally ignores robots.txt rules."
+    - titulo: "Anthropic, Does Anthropic crawl data from the web"
+      url: "https://support.claude.com/en/articles/8896518"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Claude-User sí respeta robots.txt; bloquearlo reduce visibilidad en búsqueda dirigida por el usuario."
+  verificado_el: "2026-09-10"
+  colector: bots.acceso_usuario
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "No bloquees los fetchers por usuario en robots.txt ni en el WAF si se busca aparecer en respuestas en tiempo real."
+
+- id: T-06
+  categoria: tecnico
+  ambito: metodo
+  tipos_pagina: [todas]
+  enunciado: "El colector evalúa robots.txt eligiendo el grupo de user-agent más específico, la regla de ruta más larga y, en empate, Allow."
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "RFC 9309, sección 2.2"
+      url: "https://www.rfc-editor.org/rfc/rfc9309.html"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Google Search Central, How Google interprets the robots.txt specification"
+      url: "https://developers.google.com/search/docs/crawling-indexing/robots/robots_txt"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Regla de método; no genera hallazgos."
+
+- id: T-07
+  categoria: tecnico
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "Para AI Overviews y AI Mode la página debe estar indexada y ser elegible para snippet: sin noindex ni nosnippet, sin max-snippet restrictivo y sin data-nosnippet sobre el contenido principal."
+  titulo_hallazgo: "Directivas que excluyen la página de AI Overviews y AI Mode"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, AI features and your website"
+      url: "https://developers.google.com/search/docs/appearance/ai-features"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Sin requisitos técnicos adicionales; controles: nosnippet, data-nosnippet, max-snippet, noindex."
+    - titulo: "Google Search Central, Robots meta tag specifications"
+      url: "https://developers.google.com/search/docs/crawling-indexing/robots-meta-tag"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "nosnippet y max-snippet limitan el uso como insumo de AI Overviews y AI Mode."
+    - titulo: "Google Search Central, AI optimization guide"
+      url: "https://developers.google.com/search/docs/fundamentals/ai-optimization-guide"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: tecnico.directivas_snippet
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Retira noindex y nosnippet de las páginas que deban aparecer; usa max-snippet:-1 o sin límite; aplica data-nosnippet solo a fragmentos que no deban citarse."
+
+- id: T-08
+  categoria: tecnico
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "Google-Extended no controla AI Overviews ni AI Mode y no afecta la inclusión ni el ranking en Google Search; bloquearlo no debe reportarse como pérdida de visibilidad."
+  titulo_hallazgo: "Google-Extended bloqueado (solo entrenamiento y grounding en Gemini y Vertex AI)"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Google common crawlers"
+      url: "https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Google-Extended does not impact a site's inclusion in Google Search nor is it used as a ranking signal."
+  verificado_el: "2026-09-10"
+  colector: bots.google_extended
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: "legal o dirección"
+  recomendacion: "Trátalo como decisión de política sobre entrenamiento y grounding en Gemini; no como problema de visibilidad en Google Search."
+
+- id: T-09
+  categoria: tecnico
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "El contenido principal está presente en el HTML inicial sin depender de JavaScript; Google renderiza con Chromium, pero no todos los bots ejecutan JavaScript."
+  titulo_hallazgo: "Contenido principal dependiente de JavaScript"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Understand JavaScript SEO basics"
+      url: "https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Server-side or pre-rendering is still a great idea... not all bots can run JavaScript. Para bots de OpenAI, Anthropic o Perplexity no hay documentación sobre ejecución de JavaScript (fuerza C)."
+  verificado_el: "2026-09-10"
+  colector: tecnico.dependencia_js
+  impacto_esperado: alto
+  esfuerzo: alto
+  dependencia: desarrollo
+  recomendacion: "Sirve el contenido principal en el HTML inicial mediante SSR o prerender; verifica con render sin JavaScript."
+
+- id: T-10
+  categoria: tecnico
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "La página declara un canonical absoluto, autorreferente y coincidente con la URL final."
+  titulo_hallazgo: "Canonical ausente, relativo o distinto de la URL final"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, How to specify a canonical with rel=canonical and other methods"
+      url: "https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "rel=canonical es señal fuerte; usar rutas absolutas; canonical autorreferente recomendado."
+  verificado_el: "2026-09-10"
+  colector: tecnico.canonical
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Declara un canonical absoluto que apunte a la propia URL final o a la versión que debe consolidar."
+
+- id: T-11
+  categoria: tecnico
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "Existe un sitemap XML declarado en robots.txt o en /sitemap.xml, con lastmod que refleja la última actualización significativa y sin superar 50.000 URLs o 50 MB."
+  titulo_hallazgo: "Sitemap ausente o sin lastmod fiable"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Build and submit a sitemap"
+      url: "https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "lastmod debe reflejar la última actualización significativa; Google ignora priority y changefreq."
+  verificado_el: "2026-09-10"
+  colector: tecnico.sitemap
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Publica un sitemap XML, decláralo en robots.txt y mantén lastmod exacto."
+
+- id: T-12
+  categoria: tecnico
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "Cuando hay versiones por idioma o región, cada página declara hreflang bidireccional con x-default."
+  titulo_hallazgo: "hreflang incompleto o sin retorno"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Tell Google about localized versions of your page"
+      url: "https://developers.google.com/search/docs/specialty/international/localized-versions"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "If two pages don't both point to each other, the tags will be ignored."
+  verificado_el: "2026-09-10"
+  colector: tecnico.hreflang
+  impacto_esperado: medio
+  esfuerzo: medio
+  dependencia: desarrollo
+  recomendacion: "Añade hreflang para cada variante, incluida la propia página y x-default, y verifica los enlaces de retorno."
+
+- id: T-13
+  categoria: tecnico
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "La página no lleva meta bingbot nocache ni noarchive si se busca aparecer en Copilot y en las respuestas de IA de Bing."
+  titulo_hallazgo: "Meta bingbot nocache o noarchive limita Copilot"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Bing Webmaster Blog, Announcing new options for webmasters to control their content in Bing Chat"
+      url: "https://blogs.bing.com/webmaster/september-2023/Announcing-new-options-for-webmasters-to-control-their-content-in-Bing-Chat"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "nocache limita a URL, título y snippet; noarchive excluye de las respuestas y del entrenamiento."
+  verificado_el: "2026-09-10"
+  colector: tecnico.meta_bingbot
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Retira nocache o noarchive de la meta bingbot en las páginas que deban citarse en Copilot."
+
+- id: T-14
+  categoria: tecnico
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "La página tiene una meta description única y descriptiva; Google puede usarla como snippet."
+  titulo_hallazgo: "Meta description ausente, vacía o duplicada"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Control your snippets in search results"
+      url: "https://developers.google.com/search/docs/appearance/snippet"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: tecnico.meta_description
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Redacta una meta description específica de la página, sin listas de palabras clave."
+
+- id: T-15
+  categoria: tecnico
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "El sitio usa IndexNow o sitemaps actualizados para que Bing y Copilot referencien la versión vigente de cada página."
+  titulo_hallazgo: "Sin IndexNow ni sitemap reciente para Bing"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Bing Webmaster Blog, Introducing AI Performance in Bing Webmaster Tools"
+      url: "https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "IndexNow"
+      url: "https://www.indexnow.org/"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: tecnico.indexnow
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Publica una llave IndexNow y notifica cambios, o mantén lastmod actualizado en el sitemap."
+
+- id: X-00
+  categoria: extractabilidad
+  ambito: principio
+  tipos_pagina: [todas]
+  enunciado: "Ser recuperado pesa más que ajustar el texto: la posición del documento en el contexto del modelo supera a cualquier método de optimización de contenido; primero indexación y ranking clásico."
+  fuerza: A
+  tipo_evidencia: efecto_experimental
+  fuentes:
+    - titulo: "Puerto et al., C-SEO Bench: Does Conversational SEO Work? (NeurIPS Datasets and Benchmarks 2025)"
+      url: "https://arxiv.org/abs/2506.11097"
+      fuerza: A
+      tipo_evidencia: efecto_experimental
+      nota: "La mayoría de métodos C-SEO son ineficaces o dañinos; ser el primer documento del contexto da ganancias mucho mayores."
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: alto
+  esfuerzo: medio
+  dependencia: propio
+  recomendacion: "Prioriza indexación, ranking y cobertura de las consultas antes que reescrituras."
+
+- id: X-01
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [articulo, faq, glosario, solucion, comparativa, programa, institucional]
+  enunciado: "Las primeras dos o tres oraciones del contenido principal responden directamente a la intención de la página."
+  titulo_hallazgo: "El contenido principal no abre con una respuesta directa"
+  fuerza: B
+  tipo_evidencia: correlacional
+  fuentes:
+    - titulo: "Zhang, He y Yao, From Citation Selection to Citation Absorption (preprint 2026)"
+      url: "https://arxiv.org/abs/2604.25707"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "Las páginas más influyentes son más estructuradas y ricas en definiciones, hechos numéricos, comparaciones y pasos. Correlacional."
+    - titulo: "Google Search Central, Control your snippets in search results"
+      url: "https://developers.google.com/search/docs/appearance/snippet"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Los snippets se crean principalmente a partir del contenido de la página."
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.respuesta_directa
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Abre el contenido principal con una respuesta o definición de una a tres oraciones que resuelva la pregunta del título."
+
+- id: X-02
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "La página tiene un solo H1 y una jerarquía H2/H3 sin saltos, con encabezados que enuncian la pregunta o el subtema."
+  titulo_hallazgo: "Jerarquía de encabezados rota o poco descriptiva"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Bing Webmaster Blog, Introducing AI Performance in Bing Webmaster Tools"
+      url: "https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Clear headings, tables, and FAQ sections help surface key information."
+    - titulo: "Yu et al., Structural Feature Engineering for GEO (preprint 2026)"
+      url: "https://arxiv.org/abs/2603.29979"
+      fuerza: B
+      tipo_evidencia: correlacional
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.jerarquia
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Deja un único H1, encadena H2 y H3 sin saltar niveles y redacta encabezados que enuncien la pregunta o el subtema."
+
+- id: X-03
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [comparativa, articulo, solucion, programa, institucional]
+  enunciado: "Las comparaciones van en tablas con encabezados y los procesos en listas ordenadas."
+  titulo_hallazgo: "Comparaciones o pasos sin tabla ni lista"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Bing Webmaster Blog, Introducing AI Performance in Bing Webmaster Tools"
+      url: "https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Zhang, He y Yao, From Citation Selection to Citation Absorption (preprint 2026)"
+      url: "https://arxiv.org/abs/2604.25707"
+      fuerza: B
+      tipo_evidencia: correlacional
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.tablas_listas
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Convierte comparaciones en tablas con fila de encabezado y procesos en listas numeradas."
+
+- id: X-04
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [articulo, comparativa, solucion, institucional]
+  enunciado: "Cada dato numérico del contenido principal lleva su fuente en la misma oración o párrafo."
+  titulo_hallazgo: "Datos numéricos sin fuente"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Bing Webmaster Blog, Introducing AI Performance in Bing Webmaster Tools"
+      url: "https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Examples, data, and cited sources help build trust when content is reused in AI-generated answers."
+    - titulo: "Aggarwal et al., GEO: Generative Engine Optimization (KDD 2024)"
+      url: "https://arxiv.org/abs/2311.09735"
+      fuerza: B
+      tipo_evidencia: efecto_experimental
+      nota: "Statistics Addition y Cite Sources: +30-40% en Position-Adjusted Word Count en un motor simulado con GPT-3.5 (2023). C-SEO Bench 2025 evaluó los mismos métodos en GPT-4o-mini, Claude 3.5 Haiku, o3 y o4-mini y los encontró en su mayoría ineficaces o negativos. La cifra no se presenta como efecto esperado."
+  verificado_el: "2026-09-10"
+  colector: estadisticas.datos_con_fuente
+  impacto_esperado: alto
+  esfuerzo: medio
+  dependencia: contenido
+  recomendacion: "Enlaza la fuente primaria junto a cada cifra; si no existe fuente, sustituye la cifra o márcala como dato propio con método."
+
+- id: X-05
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [articulo]
+  enunciado: "Las citas textuales están atribuidas a una persona con nombre y cargo o afiliación."
+  titulo_hallazgo: "Citas sin atribución o sin citas de expertos"
+  fuerza: B
+  tipo_evidencia: efecto_experimental
+  fuentes:
+    - titulo: "Aggarwal et al., GEO: Generative Engine Optimization (KDD 2024)"
+      url: "https://arxiv.org/abs/2311.09735"
+      fuerza: B
+      tipo_evidencia: efecto_experimental
+      nota: "Quotation Addition: 27.2 vs 19.3 de PAWC en motor simulado con GPT-3.5 (2023). C-SEO Bench 2025 no replica el efecto en motores actuales. La cifra no se presenta como efecto esperado."
+  verificado_el: "2026-09-10"
+  colector: citas.atribucion
+  impacto_esperado: medio
+  esfuerzo: medio
+  dependencia: contenido
+  recomendacion: "Atribuye cada cita con nombre, cargo y organización; añade citas de expertos reales solo si aportan."
+
+- id: X-06
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "La redacción es fluida y clara, sin relleno ni frases formulaicas."
+  titulo_hallazgo: "Redacción con señales de relleno o baja claridad"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Creating helpful, reliable, people-first content"
+      url: "https://developers.google.com/search/docs/fundamentals/creating-helpful-content"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Aggarwal et al., GEO: Generative Engine Optimization (KDD 2024)"
+      url: "https://arxiv.org/abs/2311.09735"
+      fuerza: B
+      tipo_evidencia: efecto_experimental
+      nota: "Fluency Optimization y Easy-to-Understand: +15-30% en motor simulado (2023); no replicado por C-SEO Bench 2025."
+  verificado_el: "2026-09-10"
+  colector: null
+  impacto_esperado: medio
+  esfuerzo: medio
+  dependencia: contenido
+  recomendacion: "Revisa la claridad con lectura humana; el skill solo marca esta regla como Hipótesis."
+
+- id: X-07
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "El contenido no repite palabras clave de forma artificial."
+  titulo_hallazgo: "Repetición artificial de palabras clave"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, AI optimization guide"
+      url: "https://developers.google.com/search/docs/fundamentals/ai-optimization-guide"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Aggarwal et al., GEO: Generative Engine Optimization (KDD 2024)"
+      url: "https://arxiv.org/abs/2311.09735"
+      fuerza: B
+      tipo_evidencia: efecto_experimental
+      nota: "Keyword Stuffing rindió 10% peor que la línea base en el motor simulado."
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.densidad_terminos
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Reduce la repetición del término principal y usa variantes naturales."
+
+- id: X-08
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [articulo, comparativa, faq]
+  enunciado: "La página muestra una fecha visible y etiquetada (publicado o actualizado), coherente con datePublished y dateModified, y minimiza otras fechas."
+  titulo_hallazgo: "Fecha visible ausente o incoherente con los datos estructurados"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Provide a publication date to Google Search"
+      url: "https://developers.google.com/search/docs/appearance/publication-dates"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Add a user-visible date... Ensure that the date match between the equivalent user-visible and structured values."
+  verificado_el: "2026-09-10"
+  colector: frescura.fecha_visible
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Muestra una fecha etiquetada en el contenido principal y alinéala con datePublished y dateModified."
+
+- id: X-09
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [articulo, comparativa]
+  enunciado: "El contenido se actualiza: las páginas citadas por asistentes de IA son en promedio más recientes y Bing pide contenido fresco y exacto."
+  titulo_hallazgo: "Contenido sin actualizar en más de 90 días"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Bing Webmaster Blog, Introducing AI Performance in Bing Webmaster Tools"
+      url: "https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Keep content fresh and accurate."
+    - titulo: "Ahrefs, Do AI assistants prefer to cite fresh content?"
+      url: "https://ahrefs.com/blog/do-ai-assistants-prefer-to-cite-fresh-content/"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "16.9 millones de URLs citadas; el contenido citado es 25.7% más reciente. Correlacional."
+  verificado_el: "2026-09-10"
+  colector: frescura.antiguedad
+  impacto_esperado: medio
+  esfuerzo: medio
+  dependencia: contenido
+  recomendacion: "Revisa y actualiza el contenido con cambios sustanciales; no cambies la fecha sin cambiar el contenido."
+
+- id: X-10
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [glosario, solucion, faq, programa, institucional]
+  enunciado: "La página incluye una definición explícita del término o de la solución (qué es y para quién)."
+  titulo_hallazgo: "Sin definición explícita del término o la solución"
+  fuerza: B
+  tipo_evidencia: correlacional
+  fuentes:
+    - titulo: "Zhang, He y Yao, From Citation Selection to Citation Absorption (preprint 2026)"
+      url: "https://arxiv.org/abs/2604.25707"
+      fuerza: B
+      tipo_evidencia: correlacional
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.definicion
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Añade una oración de definición con la forma sujeto, verbo y para quién."
+
+- id: X-11
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "El contenido es único y aporta información propia; no recicla lo que ya existe ni lo que un modelo generaría por sí solo."
+  titulo_hallazgo: "Contenido sin aporte propio"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, AI optimization guide"
+      url: "https://developers.google.com/search/docs/fundamentals/ai-optimization-guide"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Don't just recycle what others on the internet have already said, or could easily be produced by a generative AI model."
+  verificado_el: "2026-09-10"
+  colector: null
+  impacto_esperado: alto
+  esfuerzo: alto
+  dependencia: contenido
+  recomendacion: "Incorpora datos propios, casos, experiencia directa y método; el skill solo puede marcarla como Hipótesis."
+
+- id: X-12
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "El contenido principal se distingue del resto de la página; el texto de navegación y pie no domina el texto total."
+  titulo_hallazgo: "Contenido principal diluido entre navegación y boilerplate"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, AI optimization guide"
+      url: "https://developers.google.com/search/docs/fundamentals/ai-optimization-guide"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Making it easy for people to distinguish your main content from other elements on the page."
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.proporcion_principal
+  impacto_esperado: medio
+  esfuerzo: medio
+  dependencia: desarrollo
+  recomendacion: "Usa main o article para el contenido y reduce menús, bloques repetidos y texto de pie."
+
+- id: X-13
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "Los párrafos son cortos y tratan una sola idea."
+  titulo_hallazgo: "Párrafos largos con varias ideas"
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Consenso de practicantes; sin fuente primaria"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.parrafos
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Divide los párrafos de más de 100 palabras."
+
+- id: X-14
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [articulo, solucion, programa, institucional]
+  enunciado: "Las imágenes y videos son relevantes y llevan texto alternativo descriptivo."
+  titulo_hallazgo: "Imágenes sin texto alternativo"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, AI optimization guide"
+      url: "https://developers.google.com/search/docs/fundamentals/ai-optimization-guide"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.imagenes_alt
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Añade alt descriptivo a las imágenes del contenido principal."
+
+- id: X-15
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [faq, solucion, programa, institucional]
+  enunciado: "Si hay preguntas reales de clientes, la página las muestra en una sección de preguntas frecuentes visible; el rich result de FAQ de Google se retiró el 7 de mayo de 2026."
+  titulo_hallazgo: "Preguntas frecuentes sin sección visible"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Bing Webmaster Blog, Introducing AI Performance in Bing Webmaster Tools"
+      url: "https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Google Search Central, Search Central updates (Deprecating the FAQ rich result feature, 2026-05-08)"
+      url: "https://developers.google.com/search/updates"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.faq_visible
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Publica las preguntas reales con respuestas breves y visibles; el markup FAQPage es opcional."
+
+- id: X-16
+  categoria: extractabilidad
+  ambito: pagina
+  tipos_pagina: [articulo, solucion, programa, institucional]
+  enunciado: "El contenido incluye ejemplos concretos y casos con datos verificables."
+  titulo_hallazgo: "Sin ejemplos ni casos concretos"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Bing Webmaster Blog, Introducing AI Performance in Bing Webmaster Tools"
+      url: "https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: extractabilidad.ejemplos
+  impacto_esperado: medio
+  esfuerzo: medio
+  dependencia: contenido
+  recomendacion: "Añade al menos un ejemplo o caso con cifras propias y método."
+
+- id: S-00
+  categoria: schema
+  ambito: principio
+  tipos_pagina: [todas]
+  enunciado: "Los datos estructurados no son requisito para las funciones de IA de Google y añadir JSON-LD no aumentó las citas en un cuasi-experimento con grupo de control; son higiene, no palanca principal."
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, AI optimization guide"
+      url: "https://developers.google.com/search/docs/fundamentals/ai-optimization-guide"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Structured data isn't required for generative AI search, and there's no special schema.org markup you need to add."
+    - titulo: "Ahrefs, We Tracked 1,885 Pages Adding Schema. AI Citations Barely Moved."
+      url: "https://ahrefs.com/blog/schema-ai-citations/"
+      fuerza: B
+      tipo_evidencia: efecto_experimental
+      nota: "1,885 páginas que añadieron JSON-LD vs 4,000 de control; AI Overviews -4.6%, AI Mode +2.4%, ChatGPT +2.2% (los dos últimos indistinguibles de cero)."
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Corrige el schema por coherencia y elegibilidad, no esperando más citas."
+
+- id: S-01
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "Todo bloque JSON-LD es sintácticamente válido; JSON-LD es el formato que Google recomienda."
+  titulo_hallazgo: "JSON-LD con errores de sintaxis"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Introduction to structured data markup"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/intro-structured-data"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: schema.sintaxis
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Corrige el JSON inválido; un solo error invalida el bloque completo."
+
+- id: S-02
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "El markup refleja el contenido visible: no describe información que el usuario no ve."
+  titulo_hallazgo: "Datos estructurados que no coinciden con el contenido visible"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, General structured data guidelines"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/sd-policies"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Don't mark up content that is not visible to readers of the page."
+  verificado_el: "2026-09-10"
+  colector: schema.coherencia
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Alinea headline, autor, fechas y preguntas del markup con lo que muestra la página."
+
+- id: S-03
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [articulo, comparativa]
+  enunciado: "Los artículos llevan Article o BlogPosting con headline, image, datePublished, dateModified en ISO 8601 con zona horaria, author.name y author.url o sameAs."
+  titulo_hallazgo: "Article incompleto o ausente en un artículo"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Article structured data"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/article"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: schema.article
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Completa las propiedades recomendadas de Article y enlaza al autor con url o sameAs."
+
+- id: S-04
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [home]
+  enunciado: "La home declara Organization con name, url, logo, sameAs, description y datos de contacto, y WebSite."
+  titulo_hallazgo: "Organization incompleta o ausente en la home"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Organization structured data"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/organization"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: schema.organization
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Añade Organization con las propiedades recomendadas y WebSite en la home."
+
+- id: S-05
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [interiores]
+  enunciado: "Las páginas interiores llevan BreadcrumbList con position, name e item."
+  titulo_hallazgo: "BreadcrumbList ausente o incompleto"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Breadcrumb structured data"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/breadcrumb"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: schema.breadcrumb
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Añade BreadcrumbList coherente con la navegación visible."
+
+- id: S-06
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [solucion]
+  enunciado: "Las páginas de un solo producto llevan Product con name y al menos offers, review o aggregateRating."
+  titulo_hallazgo: "Product incompleto en página de producto"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Product snippet structured data"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/product-snippet"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Solo páginas centradas en un producto."
+  verificado_el: "2026-09-10"
+  colector: schema.product
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Si la página describe un producto con precio público, añade Product con offers."
+
+- id: S-07
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [solucion]
+  enunciado: "Las páginas de servicio pueden llevar Service con provider, serviceType, areaServed y offers; no hay rich result ni efecto demostrado."
+  titulo_hallazgo: "Servicio sin Service en el markup"
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "schema.org, Service"
+      url: "https://schema.org/Service"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: schema.service
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Opcional: describe el servicio con Service enlazado a la Organization."
+
+- id: S-08
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [faq]
+  enunciado: "FAQPage solo se usa con preguntas reales y visibles; el rich result se retiró el 7 de mayo de 2026 y no es prioritario."
+  titulo_hallazgo: "FAQPage con preguntas que no aparecen visibles"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Search Central updates (2026-05-08 y 2026-06-15)"
+      url: "https://developers.google.com/search/updates"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "schema.org, FAQPage"
+      url: "https://schema.org/FAQPage"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: schema.faqpage
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Mantén FAQPage solo si cada pregunta y respuesta aparece en la página; no lo añadas para ganar visibilidad."
+
+- id: S-09
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [local]
+  enunciado: "Las páginas de negocio local llevan LocalBusiness con name y address, y de preferencia telephone, openingHoursSpecification y geo."
+  titulo_hallazgo: "LocalBusiness incompleto o ausente"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Local business structured data"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/local-business"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: schema.localbusiness
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Completa LocalBusiness con los datos que muestra la página."
+
+- id: S-10
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [articulo, perfil]
+  enunciado: "El autor se describe como Person con url o sameAs; los perfiles internos usan ProfilePage con mainEntity."
+  titulo_hallazgo: "Autor sin Person enlazado o perfil sin ProfilePage"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Article structured data (author.url)"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/article"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Google Search Central, Profile page structured data"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/profile-page"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: schema.autor_person
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Enlaza el autor a su página de perfil con url o sameAs y marca el perfil con ProfilePage."
+
+- id: S-11
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "Las entidades repetidas usan @id único y se referencian entre sí (publisher a Organization, author a Person); varios nodos van en @graph."
+  titulo_hallazgo: "Entidades sin @id o referencias rotas en el JSON-LD"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "W3C, JSON-LD 1.1 (node identifiers y @graph)"
+      url: "https://www.w3.org/TR/json-ld11/"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Fuerza A solo para la sintaxis; el efecto en motores no está documentado (C)."
+  verificado_el: "2026-09-10"
+  colector: schema.referencias_id
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Asigna @id a Organization y Person y referéncialos desde publisher y author."
+
+- id: S-12
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "No hay bloques duplicados ni contradictorios del mismo tipo en una página."
+  titulo_hallazgo: "Bloques JSON-LD duplicados o contradictorios"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, General structured data guidelines"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/sd-policies"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "Your structured data must be a true representation of the page content."
+  verificado_el: "2026-09-10"
+  colector: schema.duplicados
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Deja un solo bloque por tipo con datos consistentes."
+
+- id: S-13
+  categoria: schema
+  ambito: pagina
+  tipos_pagina: [glosario]
+  enunciado: "Los glosarios pueden usar DefinedTerm y DefinedTermSet; sin rich result ni efecto demostrado."
+  titulo_hallazgo: "Glosario sin DefinedTerm"
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "schema.org, DefinedTerm"
+      url: "https://schema.org/DefinedTerm"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: schema.definedterm
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Opcional: marca cada término con DefinedTerm dentro de un DefinedTermSet."
+
+- id: E-01
+  categoria: entidad
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "El nombre de la marca es consistente en title, og:site_name, Organization.name y pie de página."
+  titulo_hallazgo: "Nombre de marca inconsistente entre superficies"
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Google Search Central, Organization structured data (url ayuda a identificar la organización)"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/organization"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: entidad.nombre_consistente
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Usa una sola forma del nombre de marca en todas las superficies."
+
+- id: E-02
+  categoria: entidad
+  ambito: pagina
+  tipos_pagina: [home]
+  enunciado: "Organization incluye sameAs hacia perfiles oficiales (LinkedIn, YouTube, Wikidata o Wikipedia si existen)."
+  titulo_hallazgo: "Organization sin sameAs a perfiles oficiales"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Organization structured data"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/organization"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: entidad.sameas_presentes
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Añade sameAs con los perfiles oficiales verificados de la organización."
+
+- id: E-03
+  categoria: entidad
+  ambito: pagina
+  tipos_pagina: [home]
+  enunciado: "Todas las URLs de sameAs resuelven con 200 y corresponden a la misma entidad."
+  titulo_hallazgo: "sameAs que no resuelven"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Organization structured data (definición de sameAs)"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/organization"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: entidad.sameas_resuelven
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Corrige o retira los sameAs que devuelven error."
+
+- id: E-04
+  categoria: entidad
+  ambito: pagina
+  tipos_pagina: [articulo]
+  enunciado: "Los artículos muestran autoría visible con nombre, cargo o credenciales y enlace a un perfil."
+  titulo_hallazgo: "Artículo sin autoría visible o sin credenciales"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Creating helpful, reliable, people-first content"
+      url: "https://developers.google.com/search/docs/fundamentals/creating-helpful-content"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "We strongly encourage adding accurate authorship information, such as bylines."
+    - titulo: "Google Search Central, Article structured data (author.url)"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/article"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: entidad.autoria
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Añade byline con nombre y cargo, enlazada a una página de perfil del autor."
+
+- id: E-05
+  categoria: entidad
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "El sitio tiene página de acerca de y datos de contacto visibles y enlazados desde la navegación o el pie."
+  titulo_hallazgo: "Sin página de acerca de o sin contacto visible"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Creating helpful, reliable, people-first content (Who, How, Why)"
+      url: "https://developers.google.com/search/docs/fundamentals/creating-helpful-content"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: entidad.acerca_contacto
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Enlaza una página de acerca de con equipo y una de contacto desde el pie."
+
+- id: E-06
+  categoria: entidad
+  ambito: pagina
+  tipos_pagina: [local]
+  enunciado: "Nombre, dirección y teléfono coinciden entre el contenido visible y LocalBusiness."
+  titulo_hallazgo: "NAP inconsistente entre página y LocalBusiness"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Local business structured data"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/local-business"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+      nota: "La consistencia con otras superficies externas es consenso (C)."
+  verificado_el: "2026-09-10"
+  colector: entidad.nap
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Unifica nombre, dirección y teléfono en la página, el markup y los perfiles externos."
+
+- id: E-07
+  categoria: entidad
+  ambito: offpage
+  tipos_pagina: [todas]
+  enunciado: "La marca tiene presencia en las fuentes que los motores citan (YouTube, Wikipedia, Reddit, medios); las menciones en YouTube muestran la correlación más alta con visibilidad en IA."
+  titulo_hallazgo: "Presencia de marca en fuentes citadas por los motores (revisión manual)"
+  fuerza: B
+  tipo_evidencia: correlacional
+  fuentes:
+    - titulo: "Ahrefs, Top Brand Visibility Factors in ChatGPT, AI Mode, and AI Overviews (75k Brands Studied)"
+      url: "https://ahrefs.com/blog/ai-brand-visibility-correlations/"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "Spearman ~0.74 entre menciones en YouTube y menciones en IA; correlation isn't causation."
+    - titulo: "Profound, AI Platform Citation Patterns"
+      url: "https://www.tryprofound.com/blog/ai-platform-citation-patterns"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "680 millones de citas, agosto 2024 a junio 2025; Wikipedia 7.8% en ChatGPT, Reddit 6.6% en Perplexity."
+  verificado_el: "2026-09-10"
+  colector: null
+  impacto_esperado: alto
+  esfuerzo: alto
+  dependencia: terceros
+  horizonte: largo
+  recomendacion: "Construye presencia en YouTube, Wikipedia o Wikidata, comunidades y medios del sector; el skill solo lo marca como Hipótesis."
+
+- id: E-08
+  categoria: entidad
+  ambito: sitio
+  tipos_pagina: [todas]
+  enunciado: "Bloquear los crawlers de IA reduce la aparición del sitio en motores generativos."
+  titulo_hallazgo: "Bloqueo de crawlers de IA asociado a menor aparición"
+  fuerza: A
+  tipo_evidencia: correlacional
+  fuentes:
+    - titulo: "Grossman et al., How Generative AI Disrupts Search (SIGIR 2026)"
+      url: "https://arxiv.org/abs/2604.27790"
+      fuerza: A
+      tipo_evidencia: correlacional
+  verificado_el: "2026-09-10"
+  colector: bots.acceso_busqueda
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Ver T-03: permite los bots de búsqueda de IA."
+
+- id: M-01
+  categoria: mql
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "Cada URL está mapeada a una etapa del journey y a una intención (informativa, comparativa o transaccional)."
+  titulo_hallazgo: "URL sin etapa ni intención asignada"
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Marco de práctica del skill"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: mql.etapa_intencion
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Asigna etapa e intención a cada URL y úsala para elegir el CTA."
+
+- id: M-02
+  categoria: mql
+  ambito: pagina
+  tipos_pagina: [todas]
+  enunciado: "La página tiene un llamado a la acción visible y coherente con su etapa del journey."
+  titulo_hallazgo: "CTA ausente o incoherente con la etapa"
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Marco de práctica del skill"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: mql.cta
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: contenido
+  recomendacion: "Coloca un CTA acorde: recurso descargable en descubrimiento, demo o comparador en consideración, contacto o cotización en decisión."
+
+- id: M-03
+  categoria: mql
+  ambito: pagina
+  tipos_pagina: [landing, solucion]
+  enunciado: "Los formularios capturan fuente y campaña en campos ocultos y disparan un evento de conversión."
+  titulo_hallazgo: "Formulario sin captura de fuente ni evento de conversión"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Analytics, Recommended events"
+      url: "https://support.google.com/analytics/answer/9267735"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Marco de práctica del skill (campos ocultos)"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: mql.formulario
+  impacto_esperado: alto
+  esfuerzo: medio
+  dependencia: analitica
+  recomendacion: "Añade campos ocultos para utm_source, utm_medium, utm_campaign y referrer, y dispara generate_lead al enviar."
+
+- id: M-04
+  categoria: mql
+  ambito: analitica
+  tipos_pagina: [todas]
+  enunciado: "El tráfico referido por asistentes de IA está segmentado: canal AI Assistant de GA4 (desde el 13 de mayo de 2026, excluye AI Overviews y AI Mode) más un grupo de canales personalizado para fuentes no cubiertas."
+  titulo_hallazgo: "Tráfico de asistentes de IA sin segmentar en GA4"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Analytics, Default channel group (AI Assistant)"
+      url: "https://support.google.com/analytics/answer/9756891"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Google Analytics, What's new in Google Analytics (2026-05-13)"
+      url: "https://support.google.com/analytics/answer/9164320"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Google Analytics, Custom channel groups"
+      url: "https://support.google.com/analytics/answer/13051316"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: null
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: analitica
+  recomendacion: "Verifica el canal AI Assistant y crea un grupo de canales personalizado con regex de fuentes de IA por encima de Referral."
+
+- id: M-05
+  categoria: mql
+  ambito: analitica
+  tipos_pagina: [todas]
+  enunciado: "GA4 registra los eventos recomendados de generación de leads: generate_lead, qualify_lead, working_lead y close_convert_lead."
+  titulo_hallazgo: "Eventos de lead no configurados en GA4"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Analytics, Recommended events"
+      url: "https://support.google.com/analytics/answer/9267735"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: null
+  impacto_esperado: alto
+  esfuerzo: medio
+  dependencia: analitica
+  recomendacion: "Implementa los eventos recomendados y márcalos como conversiones clave."
+
+- id: M-06
+  categoria: mql
+  ambito: analitica
+  tipos_pagina: [todas]
+  enunciado: "Los enlaces de campaña llevan utm_source, utm_medium y utm_campaign."
+  titulo_hallazgo: "Campañas sin UTM completos"
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Analytics, Collect campaign data with custom URLs"
+      url: "https://support.google.com/analytics/answer/10917952"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: mql.utm
+  impacto_esperado: medio
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Usa el Campaign URL Builder y estandariza source, medium y campaign."
+
+- id: M-07
+  categoria: mql
+  ambito: crm
+  tipos_pagina: [todas]
+  enunciado: "El scoring separa curiosidad de intención comercial con la etapa de la página de entrada, la fuente de IA, el fit con el ICP y las acciones de alta intención; la conversión del tráfico de IA difiere por motor."
+  titulo_hallazgo: "Scoring sin señales de intención ni de fuente IA"
+  fuerza: B
+  tipo_evidencia: correlacional
+  fuentes:
+    - titulo: "Seer Interactive, 6 learnings about how traffic from ChatGPT converts"
+      url: "https://www.seerinteractive.com/insights/case-study-6-learnings-about-how-traffic-from-chatgpt-converts"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "Un solo cliente, octubre 2024 a abril 2025; conversión ChatGPT 15.9%, Perplexity 10.5%, orgánico 1.76%. n=1."
+  verificado_el: "2026-09-10"
+  colector: null
+  impacto_esperado: alto
+  esfuerzo: medio
+  dependencia: crm
+  recomendacion: "Define puntos por etapa de entrada, fuente IA, fit ICP y acciones de alta intención; revisa con datos propios."
+
+- id: M-08
+  categoria: mql
+  ambito: crm
+  tipos_pagina: [todas]
+  enunciado: "El CRM tiene campos para fuente_ia, motor_ia, tema o prompt, url_entrada, etapa, fit_icp, score y primera_conversion."
+  titulo_hallazgo: "CRM sin campos para atribución de IA"
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Marco de práctica del skill"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: null
+  impacto_esperado: alto
+  esfuerzo: medio
+  dependencia: crm
+  recomendacion: "Crea los campos en el CRM declarado y mapea los campos ocultos del formulario."
+
+- id: V-01
+  categoria: visibilidad
+  ambito: metodo
+  tipos_pagina: [todas]
+  enunciado: "La visibilidad se mide con un panel fijo de prompts por intención, etapa, persona e idioma, con al menos tres repeticiones y la misma configuración entre corridas."
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Marco de práctica del skill; las respuestas de los motores no son deterministas"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: alto
+  esfuerzo: medio
+  dependencia: propio
+  recomendacion: "Regla de método."
+
+- id: V-02
+  categoria: visibilidad
+  ambito: metodo
+  tipos_pagina: [todas]
+  enunciado: "Mención y cita se miden por separado: la correlación entre citas y menciones de marca es débil o negativa."
+  fuerza: B
+  tipo_evidencia: correlacional
+  fuentes:
+    - titulo: "Kevin Indig y Semrush, The Ghost Citations Study"
+      url: "https://www.semrush.com/blog/the-ghost-citations-study/"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "Más de 600 mil citas de ChatGPT en 1,094 categorías (enero a junio 2026); correlación citas y menciones -0.229; 62% de las citas no producen mención."
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Regla de método."
+
+- id: V-03
+  categoria: visibilidad
+  ambito: metodo
+  tipos_pagina: [todas]
+  enunciado: "Cada respuesta registra competidores mencionados y citados y la precisión de la descripción de la marca con la frase textual."
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Marco de práctica del skill"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Regla de método."
+
+- id: V-04
+  categoria: visibilidad
+  ambito: metodo
+  tipos_pagina: [todas]
+  enunciado: "AI Overviews no tiene API oficial y se captura manualmente; cuando aparece un resumen, el clic a resultados tradicionales cae de 15% a 8%."
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, AI features and your website"
+      url: "https://developers.google.com/search/docs/appearance/ai-features"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Pew Research Center, Google users are less likely to click on links when an AI summary appears in the results"
+      url: "https://www.pewresearch.org/short-reads/2025/07/22/google-users-are-less-likely-to-click-on-links-when-an-ai-summary-appears-in-the-results/"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "900 adultos de EE. UU., 68,879 búsquedas, marzo 2025."
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: alto
+  esfuerzo: medio
+  dependencia: propio
+  recomendacion: "Regla de método."
+  nota_metodo: "AI Overviews requiere captura humana. Observado el 2026-09-12 en un panel de 18 prompts de un sitio universitario en México: una captura por agente automatizado (navegador controlado por script) devolvió 16 de 18 SIN_AIO con el mensaje «No se puede generar una Visión general creada por IA en este momento», mientras que la misma tanda capturada a mano en ventana de incógnito devolvió 18 de 18 con resumen. La ausencia de resumen en una captura automatizada no es evidencia de que Google no lo genere: solo cuenta como SIN_AIO la captura humana. Además, las fuentes del resumen llegan como enlaces google.com/goto que responden 403 al resolverse: la citación de AIO queda como desconocida, no como cero, y los dominios no entran al conteo; la mención sí se mide sobre el texto."
+
+- id: V-05
+  categoria: visibilidad
+  ambito: metodo
+  tipos_pagina: [todas]
+  enunciado: "AI Overviews y los asistentes citan páginas distintas: 37.9% de las citas de AI Overviews vienen del top 10 y solo 12% de las URLs citadas por asistentes rankea en el top 10 para el prompt original; se miden por separado."
+  fuerza: B
+  tipo_evidencia: correlacional
+  fuentes:
+    - titulo: "Ahrefs, Update: 38% of AI Overview Citations Pull From The Top 10"
+      url: "https://ahrefs.com/blog/ai-overview-citations-top-10/"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "863 mil SERPs y 4 millones de URLs de AI Overviews (marzo 2026)."
+    - titulo: "Ahrefs, Only 12% of AI Cited URLs Rank in Google's Top 10 for the Original Prompt"
+      url: "https://ahrefs.com/blog/ai-search-overlap/"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "15 mil prompts; Perplexity 28.6%, ChatGPT 8%, Gemini 8.2%, Copilot 8.6% (agosto 2025)."
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: alto
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Regla de método."
+
+- id: N-01
+  categoria: antipatron
+  ambito: antipatron
+  tipos_pagina: [todas]
+  enunciado: "Nunca se presenta un impacto proyectado numérico; la prioridad se expresa con impacto esperado, esfuerzo, dependencia y horizonte."
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Principio del skill"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Anti-patrón."
+
+- id: N-02
+  categoria: antipatron
+  ambito: antipatron
+  tipos_pagina: [todas]
+  enunciado: "No se propone FAQPage con preguntas sintéticas ni markup de contenido que no se ve."
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, General structured data guidelines"
+      url: "https://developers.google.com/search/docs/appearance/structured-data/sd-policies"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Anti-patrón."
+
+- id: N-03
+  categoria: antipatron
+  ambito: antipatron
+  tipos_pagina: [todas]
+  enunciado: "Las propuestas de contenido no inventan cifras, citas ni nombres; donde falte un dato se inserta [DATO REQUERIDO: descripción]."
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Principio del skill"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Anti-patrón."
+
+- id: N-04
+  categoria: antipatron
+  ambito: antipatron
+  tipos_pagina: [todas]
+  enunciado: "llms.txt es de prioridad baja: Google declara que no lo usa, ningún otro proveedor confirma consumirlo y el 97% de los archivos publicados no recibió peticiones."
+  fuerza: A
+  tipo_evidencia: requisito_oficial
+  fuentes:
+    - titulo: "Google Search Central, Search Central updates (Clarifying guidance on llms.txt files, 2026-06-15)"
+      url: "https://developers.google.com/search/updates"
+      fuerza: A
+      tipo_evidencia: requisito_oficial
+    - titulo: "Ahrefs, llms.txt study"
+      url: "https://ahrefs.com/blog/llmstxt-study/"
+      fuerza: B
+      tipo_evidencia: correlacional
+      nota: "137,210 dominios; 28% publica llms.txt; 97% de esos archivos no recibió peticiones en mayo de 2026."
+    - titulo: "llms.txt, especificación"
+      url: "https://llmstxt.org/"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: llmstxt.presencia
+  puntua: false
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: desarrollo
+  recomendacion: "Publícalo solo si cuesta poco; no lo trates como palanca de visibilidad."
+
+- id: N-05
+  categoria: antipatron
+  ambito: antipatron
+  tipos_pagina: [todas]
+  enunciado: "El skill nunca aplica cambios en producción; solo genera propuestas en salidas/."
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Principio del skill"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Anti-patrón."
+
+- id: N-06
+  categoria: antipatron
+  ambito: antipatron
+  tipos_pagina: [todas]
+  enunciado: "No se cita el +115% del paper de Princeton como efecto general ni las cifras sin fuente primaria (-60% por autoría anónima, 3.2x por frescura, +14% por listas)."
+  fuerza: C
+  tipo_evidencia: consenso
+  fuentes:
+    - titulo: "Aggarwal et al., GEO (KDD 2024), tabla 2: 115.1% es solo Cite Sources para sitios en posición 5"
+      url: "https://arxiv.org/abs/2311.09735"
+      fuerza: A
+      tipo_evidencia: efecto_experimental
+    - titulo: "Bitácora de verificación 2026-09-10 (referencias/fuentes-verificadas.md)"
+      url: "README.md"
+      fuerza: C
+      tipo_evidencia: consenso
+  verificado_el: "2026-09-10"
+  colector: null
+  puntua: false
+  impacto_esperado: bajo
+  esfuerzo: bajo
+  dependencia: propio
+  recomendacion: "Anti-patrón."

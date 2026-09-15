@@ -1,0 +1,23 @@
+# Secretos
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Sistema
+.DS_Store
+
+# Datos locales no versionados
+datos/cache/
+datos/visibilidad/raw/
+datos/negocio/*.csv
+!datos/negocio/*_ejemplo.csv
+salidas/tmp/
+
+# Repositorio de referencia (clon externo con su propio .git)
+_referencia/
