@@ -208,9 +208,10 @@ def construir(
     for clave, nombre, definicion in KPIS:
         valor = kpis.get(clave)
         kpis_filas.append([nombre, definicion, valor if valor not in (None, "") else "sin dato", kpis.get(f"{clave}_fuente", "") or ("falta export" if valor in (None, "") else "")])
-    grupos = agrupacion.agrupar_hallazgos(hallazgos, len(urls)) if urls else None
+    evaluables = agrupacion.evaluables_por_regla([r.a_dict() for r in resultados])
+    grupos = agrupacion.agrupar_hallazgos(hallazgos, len(urls), evaluables=evaluables) if urls else None
     tipos = agrupacion.tipos_detectados(urls) if urls else None
-    areas = agrupacion.por_area(hallazgos, len(urls)) if hallazgos else None
+    areas = agrupacion.por_area(hallazgos, len(urls), evaluables=evaluables) if hallazgos else None
     comparacion = agrupacion.comparar_con(hallazgos, comparar) if comparar else None
     render = agrupacion.render_por_url(urls) if urls else []
     pt = agrupacion.por_tipo([r.a_dict() for r in resultados], urls, reglas) if urls else {}

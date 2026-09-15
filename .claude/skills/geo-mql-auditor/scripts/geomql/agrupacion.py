@@ -24,12 +24,36 @@ def _h(h: Hallazgo | dict[str, Any]) -> dict[str, Any]:
     return h.a_dict() if isinstance(h, Hallazgo) else h
 
 
-def agrupar_hallazgos(hallazgos: list[Any], n_urls_medidas: int, *, umbral: int = UMBRAL_SISTEMICO) -> dict[str, Any]:
-    """Sistémico: la misma regla falla en `umbral` o más URL (se corrige una vez en la plantilla). Puntual: 1 o 2 URL."""
+def evaluables_por_regla(resultados: list[dict[str, Any]]) -> dict[str, int]:
+    """URL donde cada regla fue evaluable: filas con estado `pasa` o `falla`.
+
+    Es el denominador correcto de cualquier "X de N" por regla. Los estados
+    `no_aplica`, `sin_evidencia` y `sin_colector` no entran al denominador y
+    nunca cuentan como aprobados.
+    """
+    ev: dict[str, int] = {}
+    for r in resultados:
+        if r.get("estado") in ("pasa", "falla"):
+            ev[r["regla_id"]] = ev.get(r["regla_id"], 0) + 1
+    return ev
+
+
+def _texto_de_n(n_urls: int, n_evaluables: int, n_medidas: int) -> str:
+    if n_evaluables != n_medidas:
+        return f"{n_urls} de {n_evaluables} URL evaluables (de {n_medidas} medidas)"
+    return f"{n_urls} de {n_medidas} URL medidas"
+
+
+def agrupar_hallazgos(hallazgos: list[Any], n_urls_medidas: int, *, umbral: int = UMBRAL_SISTEMICO, evaluables: dict[str, int] | None = None) -> dict[str, Any]:
+    """Sistémico: la misma regla falla en `umbral` o más URL (se corrige una vez en la plantilla). Puntual: 1 o 2 URL.
+
+    `evaluables` (regla -> URL donde fue evaluable) da el denominador de cada hallazgo; sin él se usa el total medido.
+    """
+    evaluables = evaluables or {}
     sistemicos, puntuales = [], []
     for h in map(_h, hallazgos):
         urls = list(dict.fromkeys(h.get("urls_afectadas") or ([h.get("url")] if h.get("url") else [])))
-        entrada = {"id": h["id"], "regla_id": h["regla_id"], "titulo": h["titulo"], "evidencia_observacion": h["evidencia_observacion"], "fuerza_regla": h["fuerza_regla"], "n_urls": len(urls), "n_urls_medidas": n_urls_medidas, "urls": urls, "horizonte": h.get("horizonte", "")}
+        entrada = {"id": h["id"], "regla_id": h["regla_id"], "titulo": h["titulo"], "evidencia_observacion": h["evidencia_observacion"], "fuerza_regla": h["fuerza_regla"], "n_urls": len(urls), "n_evaluables": evaluables.get(h["regla_id"], n_urls_medidas), "n_urls_medidas": n_urls_medidas, "urls": urls, "horizonte": h.get("horizonte", "")}
         (sistemicos if len(urls) >= umbral else puntuales).append(entrada)
     sistemicos.sort(key=lambda x: (-x["n_urls"], x["regla_id"]))
     puntuales.sort(key=lambda x: (-x["n_urls"], x["regla_id"]))
@@ -52,7 +76,8 @@ def _primera_oracion(texto: str) -> str:
     return (m.group(1) if m else t).strip()
 
 
-def por_area(hallazgos: list[Any], n_urls_medidas: int) -> dict[str, list[dict[str, Any]]]:
+def por_area(hallazgos: list[Any], n_urls_medidas: int, evaluables: dict[str, int] | None = None) -> dict[str, list[dict[str, Any]]]:
+    evaluables = evaluables or {}
     """Cada hallazgo va a exactamente un área según su dependencia; la petición es la primera oración de la recomendación."""
     out: dict[str, list[dict[str, Any]]] = {a: [] for a in AREAS}
     for h in map(_h, hallazgos):
@@ -63,7 +88,7 @@ def por_area(hallazgos: list[Any], n_urls_medidas: int) -> dict[str, list[dict[s
             "regla_id": h["regla_id"],
             "titulo": h["titulo"],
             "peticion": _primera_oracion(h.get("recomendacion", "")) or h["titulo"],
-            "evidencia": f"regla {h['regla_id']} · {h['evidencia_observacion']}, {h['fuerza_regla']} · {len(urls)} de {n_urls_medidas} URL" + (" (revisión humana)" if h["evidencia_observacion"] == "Hipótesis" else ""),
+            "evidencia": f"regla {h['regla_id']} · {h['evidencia_observacion']}, {h['fuerza_regla']} · {_texto_de_n(len(urls), evaluables.get(h['regla_id'], n_urls_medidas), n_urls_medidas)}" + (" (revisión humana)" if h["evidencia_observacion"] == "Hipótesis" else ""),
             "horizonte": _HORIZONTE.get(h.get("horizonte", ""), h.get("horizonte", "")),
             "urls": urls,
         })
@@ -99,12 +124,12 @@ def markdown_extras(grupos: dict[str, Any] | None, tipos: dict[str, Any] | None,
         lineas += [f"## Hallazgos sistémicos (la misma regla falla en {grupos['umbral_sistemico']} o más URL)", "", "Se corrigen una vez en la plantilla o en la configuración del sitio.", ""]
         if grupos["sistemicos"]:
             for h in grupos["sistemicos"]:
-                lineas.append(f"- [{h['regla_id']}] {h['titulo']} · **{h['n_urls']} de {n} URL medidas** · {h['evidencia_observacion']}, {h['fuerza_regla']}")
+                lineas.append(f"- [{h['regla_id']}] {h['titulo']} · **{_texto_de_n(h['n_urls'], h.get('n_evaluables', n), n)}** · {h['evidencia_observacion']}, {h['fuerza_regla']}")
                 lineas.extend(f"  - {u}" for u in h["urls"])
         else:
             lineas.append("_Ninguno._")
         lineas += ["", "## Hallazgos puntuales (1 o 2 URL)", "", "Se corrigen página por página.", ""]
-        lineas += [f"- [{h['regla_id']}] {h['titulo']} · {h['n_urls']} de {n} URL · {h['evidencia_observacion']}, {h['fuerza_regla']} · " + ", ".join(h["urls"]) for h in grupos["puntuales"]] or ["_Ninguno._"]
+        lineas += [f"- [{h['regla_id']}] {h['titulo']} · {_texto_de_n(h['n_urls'], h.get('n_evaluables', n), n)} · {h['evidencia_observacion']}, {h['fuerza_regla']} · " + ", ".join(h["urls"]) for h in grupos["puntuales"]] or ["_Ninguno._"]
         lineas.append("")
     if comparacion:
         b = comparacion["base"]
@@ -130,6 +155,9 @@ def markdown_extras(grupos: dict[str, Any] | None, tipos: dict[str, Any] | None,
 
 
 DEPENDENCIAS_DE_NEGOCIO = ("terceros", "direccion", "dirección", "legal", "legal o dirección", "crm")
+# Mínimo de URL evaluables para declarar un patrón presente o ausente por proporción (mitad o más).
+# Con menos, "1 de 1" sería 100 % sin ser un patrón: la fila queda como evidencia insuficiente.
+MINIMO_EVALUABLES_PROPORCION = 3
 REGLAS_COMPARACION_FIJAS = [("JSON-LD", "Sin datos estructurados (JSON-LD) en la página"), ("T-09", None), ("X-02", None), ("T-12", None), ("S-05", None), ("T-14", None), ("T-10", None)]
 
 
@@ -142,7 +170,12 @@ def separar_no_evaluables(hallazgos: list[Any]) -> tuple[list[Any], list[Any]]:
     return evaluables, no_evaluables
 
 
-def _conteos(resultados: list[dict[str, Any]], urls: list[dict[str, Any]], reglas: dict[str, Any]) -> tuple[dict[str, int], dict[str, str], int]:
+def _conteos(resultados: list[dict[str, Any]], urls: list[dict[str, Any]], reglas: dict[str, Any]) -> tuple[dict[str, int], dict[str, str], int, dict[str, int]]:
+    """Fallas por regla, títulos, URL medidas (status 200) y URL evaluables por regla.
+
+    El denominador de cada regla es el número de URL donde fue evaluable (pasa o falla),
+    no el total medido. La fila sintética JSON-LD sí se evalúa en toda página con 200.
+    """
     medidas = [u for u in urls if u.get("status") == 200]
     n = len(medidas)
     fallas: dict[str, int] = {}
@@ -150,39 +183,56 @@ def _conteos(resultados: list[dict[str, Any]], urls: list[dict[str, Any]], regla
     for r in resultados:
         if r.get("estado") == "falla":
             fallas[r["regla_id"]] = fallas.get(r["regla_id"], 0) + 1
+    evaluables = evaluables_por_regla(resultados)
     fallas["JSON-LD"] = sum(1 for u in medidas if not u.get("schema_tipos"))
+    evaluables["JSON-LD"] = n
     for rid in fallas:
         regla = reglas.get(rid)
         titulos[rid] = (regla.get("titulo_hallazgo") or regla.get("enunciado")) if regla else ""
-    return fallas, titulos, n
+    return fallas, titulos, n, evaluables
 
 
 def comparar_reglas(*, resultados: list[dict[str, Any]], urls: list[dict[str, Any]], dominio: str, ruta_base: Path | str, reglas: dict[str, Any], umbral: int = UMBRAL_SISTEMICO) -> dict[str, Any]:
-    """Tabla regla por regla contra otra corrida: fallas de N URL medidas en cada dominio y veredicto compartido/exclusivo."""
+    """Tabla regla por regla contra otra corrida: fallas de N URL evaluables en cada dominio y veredicto compartido/exclusivo."""
     base = json.loads(Path(ruta_base).read_text(encoding="utf-8"))
-    fb, tb, nb = _conteos(base.get("resultados", []), base.get("urls", []), reglas)
-    fa, ta, na = _conteos(resultados, urls, reglas)
+    fb, tb, nb, eb = _conteos(base.get("resultados", []), base.get("urls", []), reglas)
+    fa, ta, na, ea = _conteos(resultados, urls, reglas)
     candidatas = [r for r, _ in REGLAS_COMPARACION_FIJAS] + sorted(r for r in set(fb) | set(fa) if r not in dict(REGLAS_COMPARACION_FIJAS) and max(fb.get(r, 0), fa.get(r, 0)) >= umbral)
 
-    def presente(f: int, n: int) -> bool:
-        return f >= umbral or (n > 0 and f / n >= 0.5)
+    def estado(f: int, n: int) -> str:
+        """presente | ausente | no_evaluable (0 URL evaluables) | insuficiente (menos de MINIMO_EVALUABLES_PROPORCION)."""
+        if f >= umbral:
+            return "presente"
+        if n == 0:
+            return "no_evaluable"
+        if n < MINIMO_EVALUABLES_PROPORCION:
+            return "insuficiente"
+        return "presente" if f / n >= 0.5 else "ausente"
 
     filas = []
     for rid in candidatas:
         titulo = dict(REGLAS_COMPARACION_FIJAS).get(rid) or tb.get(rid) or ta.get(rid) or (reglas.get(rid, {}).get("titulo_hallazgo") if rid in reglas else "") or (reglas.get(rid, {}).get("enunciado") if rid in reglas else "") or rid
         b, a = fb.get(rid, 0), fa.get(rid, 0)
-        pb, pa = presente(b, nb), presente(a, na)
-        veredicto = "compartido" if (pb and pa) else "exclusivo_base" if pb else "exclusivo_actual" if pa else "en_ninguno"
-        filas.append({"regla_id": rid, "titulo": titulo, "base_fallas": b, "base_n": nb, "actual_fallas": a, "actual_n": na, "veredicto": veredicto})
+        b_n, a_n = eb.get(rid, 0), ea.get(rid, 0)
+        sb, sa = estado(b, b_n), estado(a, a_n)
+        if "insuficiente" in (sb, sa):
+            veredicto = "evidencia_insuficiente"
+        else:
+            pb, pa = sb == "presente", sa == "presente"
+            veredicto = "compartido" if (pb and pa) else "exclusivo_base" if pb else "exclusivo_actual" if pa else "en_ninguno"
+        n_insuf = min(n for s, n in ((sb, b_n), (sa, a_n)) if s == "insuficiente") if veredicto == "evidencia_insuficiente" else None
+        filas.append({"regla_id": rid, "titulo": titulo, "base_fallas": b, "base_n": b_n, "actual_fallas": a, "actual_n": a_n, "veredicto": veredicto, "n_insuficiente": n_insuf})
     return {
         "base": {"archivo": str(ruta_base), "dominio": base.get("meta", {}).get("dominio", ""), "fecha": base.get("meta", {}).get("fecha", ""), "n_urls": nb},
         "actual": {"dominio": dominio, "n_urls": na},
-        "criterio": f"Un patrón está presente en un dominio si la regla falla en {umbral} o más URL, o en la mitad o más de las URL medidas.",
+        "criterio": f"Un patrón está presente en un dominio si la regla falla en {umbral} o más URL, o en la mitad o más de las URL donde fue evaluable, siempre que haya al menos {MINIMO_EVALUABLES_PROPORCION} evaluables; con menos, la fila queda como evidencia insuficiente. El denominador de cada fila es el número de URL donde esa regla se evaluó (pasa o falla), no el total de la corrida; por eso varía entre filas.",
+        "minimo_evaluables_proporcion": MINIMO_EVALUABLES_PROPORCION,
         "filas": filas,
         "compartidos": [f["regla_id"] for f in filas if f["veredicto"] == "compartido"],
         "exclusivos_base": [f["regla_id"] for f in filas if f["veredicto"] == "exclusivo_base"],
         "exclusivos_actual": [f["regla_id"] for f in filas if f["veredicto"] == "exclusivo_actual"],
         "en_ninguno": [f["regla_id"] for f in filas if f["veredicto"] == "en_ninguno"],
+        "evidencia_insuficiente": [f["regla_id"] for f in filas if f["veredicto"] == "evidencia_insuficiente"],
     }
 
 
@@ -190,11 +240,21 @@ def markdown_comparacion_reglas(c: dict[str, Any]) -> str:
     b, a = c["base"], c["actual"]
     lineas = [f"## Comparación regla por regla: {b['dominio']} ({b['fecha']}, {b['n_urls']} URL) frente a {a['dominio']} ({a['n_urls']} URL)", "", c["criterio"], "", f"| Regla | Patrón | {b['dominio']} | {a['dominio']} | Veredicto |", "|---|---|---|---|---|"]
     nombres = {"compartido": "compartido", "exclusivo_base": f"exclusivo de {b['dominio']}", "exclusivo_actual": f"exclusivo de {a['dominio']}", "en_ninguno": "en ninguno"}
+
+    def veredicto(f: dict[str, Any]) -> str:
+        if f["veredicto"] == "evidencia_insuficiente":
+            return f"evidencia insuficiente ({f.get('n_insuficiente', 0)} evaluables)"
+        return nombres[f["veredicto"]]
+    def celda(fallas: int, n: int) -> str:
+        return f"{fallas} de {n}" if n else "no evaluable"
+
     for f in c["filas"]:
-        lineas.append(f"| {f['regla_id']} | {f['titulo']} | {f['base_fallas']} de {f['base_n']} | {f['actual_fallas']} de {f['actual_n']} | {nombres[f['veredicto']]} |")
+        lineas.append(f"| {f['regla_id']} | {f['titulo']} | {celda(f['base_fallas'], f['base_n'])} | {celda(f['actual_fallas'], f['actual_n'])} | {veredicto(f)} |")
     lineas += ["", "### Patrones compartidos por ambos dominios", ""] + ([f"- {r}" for r in c["compartidos"]] or ["_Ninguno._"])
     lineas += ["", f"### Exclusivos de {b['dominio']}", ""] + ([f"- {r}" for r in c["exclusivos_base"]] or ["_Ninguno._"])
     lineas += ["", f"### Exclusivos de {a['dominio']}", ""] + ([f"- {r}" for r in c["exclusivos_actual"]] or ["_Ninguno._"])
+    if c.get("evidencia_insuficiente"):
+        lineas += ["", f"### Sin veredicto por evidencia insuficiente (menos de {c.get('minimo_evaluables_proporcion', MINIMO_EVALUABLES_PROPORCION)} URL evaluables en algún dominio)", ""] + [f"- {r}" for r in c["evidencia_insuficiente"]]
     lineas.append("")
     return "\n".join(lineas)
 
@@ -232,18 +292,23 @@ def por_tipo(resultados: list[dict[str, Any]], registros: list[dict[str, Any]], 
     for u, t in tipo_de.items():
         urls_por_tipo.setdefault(t, []).append(u)
     fallas: dict[str, dict[str, set[str]]] = {}
+    evaluables: dict[str, dict[str, set[str]]] = {}
     for r in resultados:
-        if r.get("estado") != "falla" or r.get("url") not in tipo_de:
+        if r.get("url") not in tipo_de or r.get("estado") not in ("pasa", "falla"):
             continue
         t = tipo_de[r["url"]]
-        fallas.setdefault(t, {}).setdefault(r["regla_id"], set()).add(r["url"])
+        evaluables.setdefault(t, {}).setdefault(r["regla_id"], set()).add(r["url"])
+        if r.get("estado") == "falla":
+            fallas.setdefault(t, {}).setdefault(r["regla_id"], set()).add(r["url"])
     out: dict[str, Any] = {}
     for t, urls in sorted(urls_por_tipo.items(), key=lambda kv: (-len(kv[1]), kv[0])):
         en_todas, en_algunas = [], []
         for rid, us in sorted(fallas.get(t, {}).items(), key=lambda kv: (-len(kv[1]), kv[0])):
             regla = reglas.get(rid)
-            entrada = {"regla_id": rid, "titulo": (regla.get("titulo_hallazgo") or regla.get("enunciado")) if regla else "", "n": len(us), "n_urls": len(urls), "urls": sorted(us)}
-            (en_todas if len(us) == len(urls) else en_algunas).append(entrada)
+            n_ev = len(evaluables.get(t, {}).get(rid, set()))
+            entrada = {"regla_id": rid, "titulo": (regla.get("titulo_hallazgo") or regla.get("enunciado")) if regla else "", "n": len(us), "n_evaluables": n_ev, "n_urls": len(urls), "urls": sorted(us)}
+            # "en todas" se juzga sobre las URL del tipo donde la regla fue evaluable, no sobre todas las del tipo
+            (en_todas if len(us) == n_ev else en_algunas).append(entrada)
         out[t] = {"n_urls": len(urls), "urls": urls, "en_todas": en_todas, "en_algunas": en_algunas}
     return out
 
@@ -255,9 +320,9 @@ def markdown_por_tipo(pt: dict[str, Any], render: list[dict[str, Any]]) -> str:
         lineas.append(f"| {r['url']} | {r['tipo']} | {r['palabras_sin_js']} | {con} | {r['veredicto']} | {r['placeholders']} / {r.get('placeholders_principal', 0)} | {', '.join(r['jsonld_tipos']) or 'ninguno'} |")
     lineas += ["", "## Hallazgos por tipo de página", "", "Lo que falla en todas las URL de un tipo se corrige en su plantilla; lo que falla en algunas, página por página.", ""]
     for t, v in pt.items():
-        lineas += [f"### {t} ({v['n_urls']} URL)", "", "Falla en todas:", ""]
-        lineas += [f"- [{x['regla_id']}] {x['titulo']} · {x['n']} de {x['n_urls']}" for x in v["en_todas"]] or ["_Ninguna._"]
+        lineas += [f"### {t} ({v['n_urls']} URL)", "", "Falla en todas las URL del tipo donde la regla fue evaluable:", ""]
+        lineas += [f"- [{x['regla_id']}] {x['titulo']} · {x['n']} de {x.get('n_evaluables', x['n_urls'])}" + (f" evaluables (de {x['n_urls']} del tipo)" if x.get('n_evaluables', x['n_urls']) != x['n_urls'] else "") for x in v["en_todas"]] or ["_Ninguna._"]
         lineas += ["", "Falla en algunas:", ""]
-        lineas += [f"- [{x['regla_id']}] {x['titulo']} · {x['n']} de {x['n_urls']} · " + ", ".join(u.split('/es/')[-1] if '/es/' in u else u for u in x["urls"][:8]) + (" …" if len(x["urls"]) > 8 else "") for x in v["en_algunas"]] or ["_Ninguna._"]
+        lineas += [f"- [{x['regla_id']}] {x['titulo']} · {x['n']} de {x.get('n_evaluables', x['n_urls'])}" + (f" evaluables (de {x['n_urls']} del tipo)" if x.get('n_evaluables', x['n_urls']) != x['n_urls'] else "") + " · " + ", ".join(u.split('/es/')[-1] if '/es/' in u else u for u in x["urls"][:8]) + (" …" if len(x["urls"]) > 8 else "") for x in v["en_algunas"]] or ["_Ninguna._"]
         lineas.append("")
     return "\n".join(lineas)

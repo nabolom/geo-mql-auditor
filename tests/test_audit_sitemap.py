@@ -174,7 +174,7 @@ def test_anexo_tecnico_sin_contexto_marca_no_evaluables_y_compara_reglas(descarg
         assert set(filas[rid]) >= {"regla_id", "titulo", "base_fallas", "base_n", "actual_fallas", "actual_n", "veredicto"}
     assert filas["JSON-LD"]["actual_fallas"] == 2, "las dos páginas del dominio nuevo no tienen JSON-LD"
     assert filas["JSON-LD"]["base_fallas"] < 8, "las fixturas de nominafacil sí traen JSON-LD en varias páginas"
-    assert set(c["compartidos"]) | set(c["exclusivos_base"]) | set(c["exclusivos_actual"]) | set(c["en_ninguno"]) == set(filas)
+    assert set(c["compartidos"]) | set(c["exclusivos_base"]) | set(c["exclusivos_actual"]) | set(c["en_ninguno"]) | set(c["evidencia_insuficiente"]) == set(filas)
     assert "## Comparación regla por regla" in md and "Patrones compartidos" in md and "Exclusivos de" in md
     assert "X de N" not in md
 
