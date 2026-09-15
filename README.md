@@ -1,4 +1,4 @@
-# geo-mql-auditor
+# Geo-Mql-Auditor
 
 Skill de Claude Code, en español, para auditar y medir la visibilidad de un sitio en motores de respuesta con IA (ChatGPT, Perplexity, Gemini, Claude, Copilot y Google AI Overviews) y conectar esa visibilidad con la generación de leads calificados (MQL). Produce reportes con hallazgos etiquetados por evidencia y priorizados por impacto, esfuerzo, dependencia y horizonte. Nunca modifica el sitio auditado.
 
