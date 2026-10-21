@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+ <url>
+  <loc>https://universidad.example/es</loc>
+  <xhtml:link rel="alternate" hreflang="es" href="https://universidad.example/es"/>
+  <lastmod>2026-09-01T09:00:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/admisiones</loc>
+  <lastmod>2026-08-18T12:30:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/becas</loc>
+  <lastmod>2026-08-18T12:45:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/quienes-somos</loc>
+  <lastmod>2026-05-20T10:00:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/licenciatura-en-psicologia</loc>
+  <lastmod>2026-07-10T08:00:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/licenciatura-en-contaduria</loc>
+  <lastmod>2026-07-10T08:10:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/ingenieria-en-software</loc>
+  <lastmod>2026-07-10T08:20:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/maestria-en-ciencia-de-datos</loc>
+  <lastmod>2026-03-03T15:00:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/sedes/sede-norte</loc>
+  <lastmod>2026-02-14T11:00:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/contacto</loc>
+  <lastmod>2026-01-12T09:00:00+00:00</lastmod>
+ </url>
+ <url>
+  <loc>https://universidad.example/es/aviso-de-privacidad</loc>
+  <lastmod>2025-11-30T09:00:00+00:00</lastmod>
+ </url>
+</urlset>

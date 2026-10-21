@@ -1,0 +1,11 @@
+{
+  "@context": "https://schema.org",
+  "@type": "Service",
+  "@id": "{{url}}#service",
+  "name": "{{h1}}",
+  "serviceType": "[DATO REQUERIDO: tipo de servicio tal como se describe en la página]",
+  "provider": {"@id": "https://{{dominio}}/#org"},
+  "areaServed": {"@type": "Country", "name": "[DATO REQUERIDO: país o región atendida]"},
+  "audience": {"@type": "BusinessAudience", "name": "[DATO REQUERIDO: a quién va dirigido según la página]"},
+  "url": "{{url}}"
+}

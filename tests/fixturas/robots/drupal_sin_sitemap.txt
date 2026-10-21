@@ -1,0 +1,22 @@
+# robots.txt de prueba para un sitio ficticio hecho con Drupal.
+# Bloquea rutas internas del CMS y, a propósito, no tiene línea Sitemap
+# aunque /sitemap.xml existe.
+
+User-agent: *
+# Recursos que el navegador necesita para pintar la página
+Allow: /core/*.css$
+Allow: /core/*.js$
+Allow: /themes/*.css$
+Allow: /themes/*.js$
+# Carpetas internas
+Disallow: /core/
+Disallow: /profiles/
+# Administración y cuentas
+Disallow: /admin/
+Disallow: /node/add/
+Disallow: /user/login
+Disallow: /user/register
+Disallow: /user/password
+# Buscador interno
+Disallow: /search/
+Disallow: /index.php/search/

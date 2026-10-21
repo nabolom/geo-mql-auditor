@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /blog/
+Allow: /blog/reducir-rotacion-personal
+Allow: /page
+Disallow: /page
+Disallow: /folder
+Allow: /folder/

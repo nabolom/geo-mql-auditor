@@ -1,0 +1,15 @@
+{
+  "@context": "https://schema.org",
+  "@type": "ProfilePage",
+  "dateCreated": "[DATO REQUERIDO: fecha de creación del perfil]",
+  "dateModified": "[DATO REQUERIDO]",
+  "mainEntity": {
+    "@type": "Person",
+    "@id": "{{url}}#person",
+    "name": "{{autor}}",
+    "jobTitle": "[DATO REQUERIDO: cargo]",
+    "worksFor": {"@id": "https://{{dominio}}/#org"},
+    "description": "[DATO REQUERIDO: bio visible en la página]",
+    "sameAs": ["[DATO REQUERIDO: URL de LinkedIn]"]
+  }
+}

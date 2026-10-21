@@ -1,0 +1,9 @@
+{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "@id": "{{url}}#product",
+  "name": "{{h1}}",
+  "description": "[DATO REQUERIDO: descripción visible del producto]",
+  "brand": {"@id": "https://{{dominio}}/#org"},
+  "offers": {"@type": "Offer", "price": "[DATO REQUERIDO: precio visible]", "priceCurrency": "MXN", "availability": "https://schema.org/InStock", "url": "{{url}}"}
+}

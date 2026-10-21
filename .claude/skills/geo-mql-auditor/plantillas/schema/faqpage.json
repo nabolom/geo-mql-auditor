@@ -1,0 +1,8 @@
+{
+  "_nota": "Usar solo si cada pregunta y respuesta aparece visible en la página. Google retiró el rich result de FAQ el 2026-05-07; este markup no es palanca de visibilidad.",
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "{{pregunta_visible_1}}", "acceptedAnswer": {"@type": "Answer", "text": "{{respuesta_visible_1}}"}}
+  ]
+}

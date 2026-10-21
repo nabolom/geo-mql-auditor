@@ -1,0 +1,26 @@
+# Secretos
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Sistema
+.DS_Store
+
+# Datos locales no versionados
+salidas/
+datos/
+marca/
+*.pdf
+
+# Contexto de negocio: solo se versiona la plantilla
+contexto/*.md
+!contexto/negocio.plantilla.md
+
+# Repositorio de referencia (clon externo con su propio .git)
+_referencia/
