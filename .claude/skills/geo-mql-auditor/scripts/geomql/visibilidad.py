@@ -9,8 +9,11 @@ subagente geo-visibilidad o una persona la clasifique; la clasificación del sub
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import os
 import re
+import tempfile
 import unicodedata
 from collections import defaultdict
 from datetime import date, datetime
@@ -42,6 +45,7 @@ def es_fuente_opaca(url: str) -> bool:
     return bool(_OPACA_RE.match((u.netloc or "").lower()))
 SIN_RESPUESTA = "SIN_RESPUESTA"
 SIN_AIO = "SIN_AIO"
+MARCA_CAPTURA_INCOMPLETA = "CAPTURA_INCOMPLETA_FORZADA"
 MODELO_MANUAL = "interfaz web"
 
 # Señales geográficas: país -> marcadores fuertes (país, gentilicio, ciudades) y débiles (siglas de universidades, que solo cuentan con un marcador fuerte).
@@ -61,8 +65,8 @@ _GEO = {
     "Brasil": (["Brasil", "brasileña", "brasileño", "São Paulo"], []),
 }
 COLUMNAS_RESUMEN = [
-    "corrida", "modo", "fecha", "motor", "n_prompts", "n_respuestas", "share_of_answers", "tasa_citacion", "share_of_voice",
-    "acuerdo_mencion", "acuerdo_cita", "precision_correcta", "precision_parcial", "precision_incorrecta", "precision_sin_evaluar", "con_prompts_ejemplo",
+    "corrida", "modo", "fecha", "motor", "modelo", "n_prompts", "n_respuestas", "share_of_answers", "tasa_citacion", "share_of_voice",
+    "acuerdo_mencion", "acuerdo_cita", "precision_correcta", "precision_parcial", "precision_incorrecta", "precision_sin_evaluar", "con_prompts_ejemplo", "huella_panel", "captura_incompleta_forzada",
 ]
 COLUMNAS_CALIBRACION = ["fecha", "motor", "corrida_manual", "corrida_api", "n_prompts", "jaccard_medio", "acuerdo_mencion", "veredicto"]
 
@@ -99,16 +103,61 @@ def _leer_csv(ruta: Path | str) -> list[dict[str, str]]:
         return [{(k or "").lstrip("\ufeff").strip(): v for k, v in r.items()} for r in csv.DictReader(f)]
 
 
+_CORRIDA_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def validar_corrida(corrida: str) -> str:
+    if not isinstance(corrida, str) or not _CORRIDA_RE.fullmatch(corrida) or ".." in corrida:
+        raise ValueError("corrida debe ser un ID de 1–128 caracteres; no se permiten rutas ni segmentos '..'")
+    return corrida
+
+
+def validar_panel(prompts: list[dict[str, Any]]) -> None:
+    if not prompts:
+        raise ValueError("el panel de prompts está vacío")
+    vistos = set()
+    for i, prompt in enumerate(prompts):
+        if not isinstance(prompt, dict):
+            raise ValueError(f"prompt {i} no es un objeto")
+        pid = validar_corrida(prompt.get("id", ""))
+        if pid in vistos:
+            raise ValueError(f"prompt_id duplicado en el panel: {pid}")
+        if not (prompt.get("prompt") or "").strip():
+            raise ValueError(f"prompt vacío para {pid}")
+        vistos.add(pid)
+
+
 def _escribir_csv(ruta: Path | str, columnas: list[str], filas: list[dict[str, Any]], *, anexar: bool = False) -> None:
     ruta = Path(ruta)
     ruta.parent.mkdir(parents=True, exist_ok=True)
-    nuevo = not (anexar and ruta.exists() and ruta.stat().st_size > 0)
-    with open(ruta, "a" if anexar else "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=columnas, extrasaction="ignore")
-        if nuevo:
-            w.writeheader()
-        for fila in filas:
-            w.writerow({c: ("" if fila.get(c) is None else fila.get(c, "")) for c in columnas})
+    existentes: list[dict[str, str]] = []
+    if anexar and ruta.exists() and ruta.stat().st_size:
+        with open(ruta, encoding="utf-8-sig", newline="") as f:
+            lector = csv.DictReader(f)
+            encabezado = lector.fieldnames or []
+            campos_nuevos = set(columnas) - set(encabezado)
+            if campos_nuevos <= {"huella_panel", "modelo", "captura_incompleta_forzada"} and campos_nuevos and set(encabezado) <= set(columnas):
+                existentes = list(lector)  # migración aditiva única; conserva todos los campos existentes
+            elif set(encabezado) != set(columnas):
+                raise ValueError(f"encabezado CSV incompatible en {ruta}: esperado {columnas}, encontrado {encabezado}")
+            else:
+                existentes = list(lector)
+    fd, temporal = tempfile.mkstemp(prefix=f".{ruta.name}.", suffix=".tmp", dir=ruta.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            escritor = csv.DictWriter(f, fieldnames=columnas, extrasaction="raise")
+            escritor.writeheader()
+            for fila in existentes + (filas if anexar else []):
+                escritor.writerow({c: ("" if fila.get(c) is None else fila.get(c, "")) for c in columnas})
+            if not anexar:
+                for fila in filas:
+                    escritor.writerow({c: ("" if fila.get(c) is None else fila.get(c, "")) for c in columnas})
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporal, ruta)
+    finally:
+        if os.path.exists(temporal):
+            os.unlink(temporal)
 
 
 def _host(url: str) -> str:
@@ -223,21 +272,47 @@ def cargar_config(ruta: Path | str, ctx: dict[str, Any] | None = None) -> dict[s
 def motores_para(modo: str, pedidos: list[str] | None, cfg: dict[str, Any]) -> list[str]:
     if modo not in MODOS:
         raise ValueError(f"modo inválido: {modo}")
-    activos = [m for m, v in cfg.get("motores", {}).items() if v.get("activo", True)]
-    if pedidos:
-        elegidos = [m for m in pedidos if m in MOTORES]
-        if modo == "api":
-            malos = [m for m in elegidos if m in MOTORES_SOLO_MANUAL]
-            if malos:
-                raise ValueError("solo captura manual para: " + ", ".join(malos))
-        return elegidos
-    # sin lista explícita: en modo API se omiten en silencio los motores solo manuales (AI Overviews)
-    return [m for m in activos if m in MOTORES and (modo == "manual" or m not in MOTORES_SOLO_MANUAL)]
+    configurados = cfg.get("motores") or {}
+    activos = [m for m, v in configurados.items() if m in MOTORES and isinstance(v, dict) and v.get("activo", True)]
+    if pedidos is None:
+        elegidos = [m for m in activos if not (modo == "api" and m in MOTORES_SOLO_MANUAL)]
+    else:
+        desconocidos = [m for m in pedidos if m not in MOTORES]
+        if desconocidos:
+            raise ValueError("motores desconocidos: " + ", ".join(desconocidos))
+        if len(set(pedidos)) != len(pedidos):
+            raise ValueError("la lista contiene motores duplicados")
+        inactivos = [m for m in pedidos if m not in activos]
+        if inactivos:
+            raise ValueError("motores desactivados o no configurados: " + ", ".join(inactivos))
+        elegidos = list(pedidos)
+    if modo == "api":
+        manuales = [m for m in elegidos if m in MOTORES_SOLO_MANUAL]
+        if manuales:
+            raise ValueError("solo captura manual para: " + ", ".join(manuales))
+    return elegidos
+
+
+def validar_motor_modo(motor: str, modo: str) -> None:
+    if modo not in MODOS:
+        raise ValueError(f"modo inválido: {modo}")
+    if motor not in MOTORES:
+        raise ValueError(f"motor desconocido: {motor}")
+    if modo == "api" and motor in MOTORES_SOLO_MANUAL:
+        raise ValueError(f"{motor} solo admite captura manual")
 
 
 # ------------------------------------------------------------------ captura manual
 def hoja_captura(prompts: list[dict[str, str]], cfg: dict[str, Any], *, motores: list[str], repeticiones: int, fecha: date, corrida: str) -> dict[str, Any]:
     """Hoja Markdown con un bloque por prompt × motor × repetición y el CSV vacío donde se pegan las respuestas."""
+    validar_corrida(corrida)
+    validar_panel(prompts)
+    if not 1 <= repeticiones <= 50:
+        raise ValueError("repeticiones debe estar entre 1 y 50")
+    for motor in motores:
+        validar_motor_modo(motor, "manual")
+    if len(set(motores)) != len(motores):
+        raise ValueError("la lista contiene motores duplicados")
     u = cfg.get("user_location") or {}
     lugar = ", ".join(x for x in (u.get("city"), u.get("region"), u.get("country")) if x) or "sin ubicación definida"
     filas: list[dict[str, str]] = []
@@ -281,9 +356,12 @@ def hoja_captura(prompts: list[dict[str, str]], cfg: dict[str, Any], *, motores:
 def escribir_captura(hoja: dict[str, Any], directorio: Path | str, *, fecha: date) -> dict[str, str]:
     directorio = Path(directorio)
     directorio.mkdir(parents=True, exist_ok=True)
-    md = directorio / f"captura_{fecha.isoformat()}_{hoja['corrida']}.md"
-    csv_ = directorio / f"respuestas_{fecha.isoformat()}_{hoja['corrida']}.csv"
-    md.write_text(hoja["markdown"], encoding="utf-8")
+    corrida = validar_corrida(hoja["corrida"])
+    md = directorio / f"captura_{fecha.isoformat()}_{corrida}.md"
+    csv_ = directorio / f"respuestas_{fecha.isoformat()}_{corrida}.csv"
+    if md.exists() or csv_.exists():
+        raise FileExistsError(f"ya existe un archivo de captura para la corrida {corrida}; elige otro ID")
+    _escribir_texto_atomico(md, hoja["markdown"], sobrescribir=False)
     _escribir_csv(csv_, COLUMNAS_RESPUESTAS, hoja["filas"])
     return {"md": str(md), "csv": str(csv_)}
 
@@ -319,24 +397,49 @@ def prompt_nombra_marca(prompt: str, ctx: dict[str, Any]) -> bool:
 
 def importar_captura(ruta: Path | str, prompts: list[dict[str, str]], *, corrida: str, fecha: date, modo: str = "manual", repeticion: int = 1) -> dict[str, Any]:
     """Convierte un CSV externo (motor, prompt_id, pregunta, respuesta, urls_citadas, notas; con o sin BOM) a la plantilla de respuestas y lo valida contra el panel."""
+    validar_corrida(corrida)
+    if not 1 <= repeticion <= 50:
+        raise ValueError("repeticion debe estar entre 1 y 50")
+    if modo not in MODOS:
+        raise ValueError(f"modo inválido: {modo}")
+    validar_panel(prompts)
     origen = _leer_csv(ruta)
     por_id = {p["id"]: p for p in prompts}
     filas = []
     desconocidos = []
     no_coinciden = []
     sin_respuesta = []
+    vacias = []
+    motores_invalidos = []
+    urls_invalidas = []
+    duplicadas = []
+    vistas = set()
     for r in origen:
         motor = (r.get("motor") or "").strip().lower()
         pid = (r.get("prompt_id") or "").strip()
         pregunta = (r.get("pregunta") or r.get("prompt") or "").strip()
         respuesta = (r.get("respuesta") or "").strip()
         notas = (r.get("notas") or "").strip()
+        try:
+            validar_motor_modo(motor, modo)
+        except ValueError as e:
+            motores_invalidos.append({"motor": motor, "error": str(e)})
+        clave = (motor, pid, repeticion)
+        if clave in vistas:
+            duplicadas.append({"motor": motor, "prompt_id": pid, "repeticion": repeticion})
+        vistas.add(clave)
         if pid not in por_id:
             desconocidos.append(pid)
         elif pregunta and _norm(pregunta) != _norm(por_id[pid]["prompt"]):
             no_coinciden.append({"motor": motor, "prompt_id": pid, "pregunta_archivo": pregunta, "pregunta_panel": por_id[pid]["prompt"]})
         if respuesta.upper() == SIN_RESPUESTA:
             sin_respuesta.append({"motor": motor, "prompt_id": pid, "nota": notas})
+        if not respuesta:
+            vacias.append({"motor": motor, "prompt_id": pid})
+        for url in filter(None, ((r.get("urls_citadas") or "").split("|"))):
+            parsed_url = urlparse(url.strip())
+            if parsed_url.scheme not in ("http", "https") or not parsed_url.hostname:
+                urls_invalidas.append({"motor": motor, "prompt_id": pid, "url": url.strip()})
         filas.append({"corrida": corrida, "modo": modo, "fecha": fecha.isoformat(), "motor": motor, "modelo": MODELO_MANUAL if modo == "manual" else "", "prompt_id": pid, "repeticion": str(repeticion), "respuesta": respuesta, "urls_citadas": (r.get("urls_citadas") or "").strip(), "notas": notas})
     motores_presentes = sorted({f["motor"] for f in filas if f["motor"]})
     presentes = {(f["motor"], f["prompt_id"]) for f in filas}
@@ -349,8 +452,12 @@ def importar_captura(ruta: Path | str, prompts: list[dict[str, str]], *, corrida
         "combinaciones_faltantes": faltantes,
         "preguntas_no_coinciden": no_coinciden,
         "sin_respuesta": sin_respuesta,
+        "respuestas_vacias": vacias,
+        "motores_invalidos": motores_invalidos,
+        "urls_invalidas": urls_invalidas,
+        "filas_duplicadas": duplicadas,
     }
-    completa = not desconocidos and not faltantes and not no_coinciden
+    completa = bool(filas) and not (desconocidos or faltantes or no_coinciden or vacias or motores_invalidos or urls_invalidas or duplicadas)
     return {"filas": filas, "validacion": validacion, "completa": completa}
 
 
@@ -394,12 +501,21 @@ def parsear_txt_captura(texto: str) -> list[dict[str, str]]:
 
 def importar_txt(ruta: Path | str, prompts: list[dict[str, str]], *, corrida: str, motor: str, modo: str = "manual", fecha: date, repeticion: int = 1) -> dict[str, Any]:
     """Convierte una captura manual en texto (un motor) a la plantilla de respuestas y la valida contra el panel."""
+    validar_corrida(corrida)
+    validar_motor_modo(motor, modo)
+    validar_panel(prompts)
+    if not 1 <= repeticion <= 50:
+        raise ValueError("repeticion debe estar entre 1 y 50")
     texto = Path(ruta).read_text(encoding="utf-8-sig")
     bloques = parsear_txt_captura(texto)
     por_id = {p["id"]: p for p in prompts}
-    filas, desconocidos, no_coinciden, sin_aio, sin_respuesta = [], [], [], [], []
+    filas, desconocidos, no_coinciden, sin_aio, sin_respuesta, vacias, duplicadas, urls_invalidas = [], [], [], [], [], [], [], []
+    vistos = set()
     for b in bloques:
         pid = b["prompt_id"]
+        if pid in vistos:
+            duplicadas.append(pid)
+        vistos.add(pid)
         if pid not in por_id:
             desconocidos.append(pid)
         elif b["pregunta"] and _norm(b["pregunta"]) != _norm(por_id[pid]["prompt"]):
@@ -408,15 +524,41 @@ def importar_txt(ruta: Path | str, prompts: list[dict[str, str]], *, corrida: st
             sin_aio.append(pid)
         if b["respuesta"].upper() == SIN_RESPUESTA:
             sin_respuesta.append({"motor": motor, "prompt_id": pid, "nota": b["notas"]})
+        if not b["respuesta"]:
+            vacias.append(pid)
+        for url in b["urls"]:
+            parsed_url = urlparse(url.strip())
+            if parsed_url.scheme not in ("http", "https") or not parsed_url.hostname:
+                urls_invalidas.append({"prompt_id": pid, "url": url.strip()})
         filas.append({"corrida": corrida, "modo": modo, "fecha": fecha.isoformat(), "motor": motor, "modelo": MODELO_MANUAL if modo == "manual" else "", "prompt_id": pid, "repeticion": str(repeticion), "respuesta": b["respuesta"], "urls_citadas": "|".join(b["urls"]), "notas": b["notas"]})
     presentes = {f["prompt_id"] for f in filas}
     faltantes = [(motor, p["id"]) for p in prompts if p["id"] not in presentes]
-    validacion = {"n_filas": len(filas), "motores": [motor], "prompt_ids": sorted(presentes), "prompt_ids_desconocidos": sorted(set(desconocidos)), "combinaciones_faltantes": faltantes, "preguntas_no_coinciden": no_coinciden, "sin_aio": sin_aio, "sin_respuesta": sin_respuesta, "n_urls": sum(len(b["urls"]) for b in bloques), "n_urls_opacas": sum(1 for b in bloques for u in b["urls"] if es_fuente_opaca(u))}
-    return {"filas": filas, "validacion": validacion, "completa": not desconocidos and not faltantes and not no_coinciden}
+    validacion = {"n_filas": len(filas), "motores": [motor], "prompt_ids": sorted(presentes), "prompt_ids_desconocidos": sorted(set(desconocidos)), "combinaciones_faltantes": faltantes, "preguntas_no_coinciden": no_coinciden, "sin_aio": sin_aio, "sin_respuesta": sin_respuesta, "respuestas_vacias": vacias, "filas_duplicadas": duplicadas, "urls_invalidas": urls_invalidas, "n_urls": sum(len(b["urls"]) for b in bloques), "n_urls_opacas": sum(1 for b in bloques for u in b["urls"] if es_fuente_opaca(u))}
+    completa = bool(filas) and not (desconocidos or faltantes or no_coinciden or vacias or duplicadas or urls_invalidas)
+    return {"filas": filas, "validacion": validacion, "completa": completa}
 
 
 def escribir_respuestas(ruta: Path | str, filas: list[dict[str, Any]]) -> None:
     _escribir_csv(ruta, COLUMNAS_RESPUESTAS, filas)
+
+
+def _escribir_texto_atomico(ruta: Path | str, contenido: str, *, sobrescribir: bool = True) -> None:
+    ruta = Path(ruta)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporal = tempfile.mkstemp(prefix=f".{ruta.name}.", suffix=".tmp", dir=ruta.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(contenido)
+            f.flush()
+            os.fsync(f.fileno())
+        if sobrescribir:
+            os.replace(temporal, ruta)
+        else:
+            os.link(temporal, ruta)
+            os.unlink(temporal)
+    finally:
+        if os.path.exists(temporal):
+            os.unlink(temporal)
 
 
 # ------------------------------------------------------------------ análisis
@@ -497,27 +639,49 @@ def analizar_respuesta(texto: str, urls: list[str], ctx: dict[str, Any]) -> dict
 
 
 def respuesta_id(fila: dict[str, Any]) -> str:
-    return f"{fila.get('corrida', '')}/{fila.get('motor', '')}/{fila.get('prompt_id', '')}/{fila.get('repeticion', '')}"
+    identidad = [str(fila.get(k, "") or "") for k in ("corrida", "modo", "motor", "modelo", "prompt_id", "repeticion")]
+    return json.dumps(identidad, ensure_ascii=False, separators=(",", ":"))
 
 
 def analizar(ruta_respuestas: Path | str, ctx: dict[str, Any], prompts: list[dict[str, str]]) -> list[dict[str, str]]:
     """Convierte un CSV de respuestas (manual o API) en filas de historial."""
+    validar_panel(prompts)
     por_id = {p["id"]: p for p in prompts}
     pais = pais_del_contexto(ctx)
     filas = []
+    identidades = set()
     for r in _leer_csv(ruta_respuestas):
         texto = (r.get("respuesta") or "").strip()
         if not texto:
             continue  # fila de plantilla sin llenar
-        p = por_id.get(r.get("prompt_id", ""), {})
-        urls = [u for u in (r.get("urls_citadas") or "").split("|") if u.strip()]
+        corrida = validar_corrida(r.get("corrida", ""))
+        modo = (r.get("modo") or "manual").strip().lower()
+        motor = (r.get("motor") or "").strip().lower()
+        validar_motor_modo(motor, modo)
+        pid = (r.get("prompt_id") or "").strip()
+        if pid not in por_id:
+            raise ValueError(f"prompt_id desconocido en respuestas: {pid!r}")
+        try:
+            repeticion = int(r.get("repeticion") or "1")
+        except ValueError as e:
+            raise ValueError(f"repetición inválida en {motor}/{pid}") from e
+        if not 1 <= repeticion <= 50:
+            raise ValueError(f"repetición fuera de rango en {motor}/{pid}: {repeticion}")
+        if texto.upper() == SIN_AIO and (motor != "aio" or modo != "manual"):
+            raise ValueError("SIN_AIO solo es válido en modo manual para el motor aio")
+        p = por_id[pid]
+        urls = [u.strip() for u in (r.get("urls_citadas") or "").split("|") if u.strip()]
+        for url in urls:
+            parsed_url = urlparse(url.strip())
+            if parsed_url.scheme not in ("http", "https") or not parsed_url.hostname:
+                raise ValueError(f"URL citada inválida en {motor}/{pid}: {url!r}")
         faltante = texto.upper() == SIN_RESPUESTA
         a = analizar_respuesta("" if (faltante or texto.upper() == SIN_AIO) else texto, urls if not faltante else [], ctx)
         geo = senales_geograficas(texto, pais) if (pais and not faltante) else {"paises": [], "terminos": []}
-        filas.append({
-            "corrida": r.get("corrida", ""), "modo": r.get("modo", "manual"), "fecha": r.get("fecha", ""), "motor": r.get("motor", ""), "modelo": r.get("modelo", ""),
-            "prompt_id": r.get("prompt_id", ""), "prompt": p.get("prompt", ""), "intencion": p.get("intencion", ""), "etapa": p.get("etapa", ""), "persona": p.get("persona", ""),
-            "idioma": p.get("idioma", ""), "origen_prompt": p.get("origen", ""), "repeticion": str(r.get("repeticion", "")),
+        fila = {
+            "corrida": corrida, "modo": modo, "fecha": r.get("fecha", ""), "motor": motor, "modelo": r.get("modelo", ""),
+            "prompt_id": pid, "prompt": p.get("prompt", ""), "intencion": p.get("intencion", ""), "etapa": p.get("etapa", ""), "persona": p.get("persona", ""),
+            "idioma": p.get("idioma", ""), "origen_prompt": p.get("origen", ""), "repeticion": str(repeticion),
             "mencion": "" if faltante else ("1" if a["mencion"] else "0"), "cita": "" if (faltante or a["cita"] is None) else ("1" if a["cita"] else "0"),
             "urls_citadas": "|".join(a["urls_citadas"]), "urls_citadas_propias": "|".join(a["urls_citadas_propias"]), "n_urls_citadas": str(a["n_urls_citadas"]),
             "posicion_mencion": "" if a["posicion_mencion"] is None else str(a["posicion_mencion"]), "rango_cita": "" if a["rango_cita"] is None else str(a["rango_cita"]),
@@ -526,7 +690,12 @@ def analizar(ruta_respuestas: Path | str, ctx: dict[str, Any], prompts: list[dic
             "estado": "sin_respuesta" if faltante else "respuesta", "nota": (r.get("notas") or "").strip(), "prompt_con_marca": "1" if prompt_nombra_marca(p.get("prompt", ""), ctx) else "0",
             "geografia_ajena_paises": ";".join(geo["paises"]), "geografia_ajena_terminos": ";".join(geo["terminos"]),
             "n_urls_opacas": str(a["n_urls_opacas"]),
-        })
+        }
+        rid = respuesta_id(fila)
+        if rid in identidades:
+            raise ValueError(f"respuesta duplicada en el CSV: {rid}")
+        identidades.add(rid)
+        filas.append(fila)
     return filas
 
 
@@ -536,8 +705,21 @@ def _reales(filas: list[dict[str, str]]) -> list[dict[str, str]]:
 
 
 def anexar_historial(ruta: Path | str, filas: list[dict[str, str]]) -> int:
-    existentes = {respuesta_id(f) for f in _leer_csv(ruta)}
-    nuevas = [f for f in filas if respuesta_id(f) not in existentes]
+    por_id: dict[str, dict[str, str]] = {}
+    for fila in _leer_csv(ruta):
+        rid = respuesta_id(fila)
+        if rid in por_id:
+            raise ValueError(f"el historial ya contiene respuesta_id duplicados: {rid}")
+        por_id[rid] = fila
+    nuevas = []
+    for fila in filas:
+        rid = respuesta_id(fila)
+        existente = por_id.get(rid)
+        if existente is None:
+            por_id[rid] = fila
+            nuevas.append(fila)
+        elif any(str(existente.get(k) or "") != str(fila.get(k) or "") for k in COLUMNAS_HISTORIAL):
+            raise ValueError(f"respuesta_id ya existe con contenido distinto: {rid}; no se sobrescribe el historial")
     if nuevas:
         _escribir_csv(ruta, COLUMNAS_HISTORIAL, nuevas, anexar=True)
     return len(nuevas)
@@ -601,6 +783,10 @@ def metricas(filas: list[dict[str, str]], *, corrida: str, resumen_previo: Path 
     if len(modos) > 1:
         raise ValueError("una corrida no puede mezclar modos: " + ", ".join(sorted(m or "" for m in modos)))
     modo = next(iter(modos), "manual") or "manual"
+    modelos_por_motor = {motor: sorted({f.get("modelo", "") for f in todas if f.get("motor") == motor}) for motor in sorted({f.get("motor", "") for f in todas})}
+    modelos_inconsistentes = {motor: modelos for motor, modelos in modelos_por_motor.items() if len(modelos) > 1}
+    if modelos_inconsistentes:
+        raise ValueError("una corrida no puede mezclar modelos para un motor: " + ", ".join(f"{motor}={modelos}" for motor, modelos in modelos_inconsistentes.items()))
     faltantes_filas = [f for f in todas if (f.get("estado") or "respuesta") == "sin_respuesta"]
     filas = _reales(todas)
     por_motor = {m: _bloque([f for f in filas if f.get("motor") == m]) for m in sorted({f.get("motor", "") for f in todas})}
@@ -609,26 +795,38 @@ def metricas(filas: list[dict[str, str]], *, corrida: str, resumen_previo: Path 
         valores = sorted({f.get(dim, "") for f in filas})
         cortes[dim] = {v: _bloque([f for f in filas if f.get(dim, "") == v]) for v in valores}
     precision = {p: sum(1 for f in filas if (f.get("precision") or "sin_evaluar") == p) for p in PRECISIONES}
+    captura_incompleta_forzada = any(MARCA_CAPTURA_INCOMPLETA in (f.get("nota") or "") for f in todas)
     ejemplo = sorted({f.get("prompt_id", "") for f in filas if f.get("origen_prompt") == "ejemplo"})
+    campos_panel = ("prompt_id", "prompt", "intencion", "etapa", "persona", "idioma", "origen_prompt")
+    panel = sorted({tuple(str(f.get(c, "") or "") for c in campos_panel) for f in todas})
+    huella_panel = hashlib.sha256(json.dumps(panel, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
     base = _base_previa(resumen_previo, modo, corrida)
     delta = None
     if base:
         motores_base = sorted(k for k in base if k != "global")
         motores_actual = sorted(por_motor)
-        delta = {"base": {"corrida": next(iter(base.values()))["corrida"], "modo": modo, "fecha": next(iter(base.values())).get("fecha", "")}, "global": {}, "por_motor": {}, "motores_base": motores_base, "motores_actual": motores_actual, "comparable_global": motores_base == motores_actual}
+        huellas_base = {f.get("huella_panel", "") for f in base.values()}
+        base_capturas_completas = all(f.get("captura_incompleta_forzada") == "0" for f in base.values())
+        panel_comparable = len(huellas_base) == 1 and bool(huella_panel) and huellas_base == {huella_panel} and base_capturas_completas and not captura_incompleta_forzada
+        modelos_comparables = all(base.get(m, {}).get("modelo", "") == (modelos_por_motor.get(m) or [""])[0] for m in set(motores_base) & set(motores_actual) if m != "global")
+        comparable_global = motores_base == motores_actual and panel_comparable and modelos_comparables
+        delta = {"base": {"corrida": next(iter(base.values()))["corrida"], "modo": modo, "fecha": next(iter(base.values())).get("fecha", "")}, "global": {}, "por_motor": {}, "motores_base": motores_base, "motores_actual": motores_actual, "comparable_panel": panel_comparable, "comparable_modelos": modelos_comparables, "comparable_global": comparable_global}
         actual_global = _bloque(filas)
-        if "global" in base:
+        if comparable_global and "global" in base:
             for k in ("share_of_answers", "tasa_citacion", "share_of_voice"):
                 try:
                     delta["global"][k] = round((actual_global[k] or 0) - float(base["global"].get(k) or 0), 4)
                 except (TypeError, ValueError):
                     delta["global"][k] = None
         for m, b in por_motor.items():
-            if m in base:
+            if m in base and panel_comparable and base[m].get("modelo", "") == (modelos_por_motor.get(m) or [""])[0]:
                 delta["por_motor"][m] = {k: round((b[k] or 0) - float(base[m].get(k) or 0), 4) for k in ("share_of_answers", "tasa_citacion")}
     return {
         "corrida": corrida,
         "modo": modo,
+        "modelos_por_motor": modelos_por_motor,
+        "huella_panel": huella_panel,
+        "captura_incompleta_forzada": captura_incompleta_forzada,
         "fecha": max((f.get("fecha", "") for f in filas), default=""),
         "global": _bloque(filas),
         "por_motor": por_motor,
@@ -733,20 +931,44 @@ def filas_resumen(m: dict[str, Any], *, fecha: date) -> list[dict[str, Any]]:
     def fila(motor: str, b: dict[str, Any]) -> dict[str, Any]:
         return {
             "corrida": m["corrida"], "modo": m["modo"], "fecha": fecha.isoformat(), "motor": motor,
+            "modelo": "" if motor == "global" else (m.get("modelos_por_motor", {}).get(motor) or [""])[0],
             "n_prompts": b["n_prompts"], "n_respuestas": b["n_respuestas"], "share_of_answers": b["share_of_answers"], "tasa_citacion": b["tasa_citacion"], "share_of_voice": b["share_of_voice"],
             "acuerdo_mencion": m["variabilidad"]["acuerdo_mencion"], "acuerdo_cita": m["variabilidad"]["acuerdo_cita"],
             "precision_correcta": m["precision"]["correcta"], "precision_parcial": m["precision"]["parcial"], "precision_incorrecta": m["precision"]["incorrecta"], "precision_sin_evaluar": m["precision"]["sin_evaluar"],
             "con_prompts_ejemplo": 1 if m["con_prompts_ejemplo"] else 0,
+            "huella_panel": m["huella_panel"], "captura_incompleta_forzada": "1" if m.get("captura_incompleta_forzada") else "0",
         }
     return [fila("global", m["global"])] + [fila(motor, b) for motor, b in m["por_motor"].items()]
 
 
 def anexar_resumen(ruta: Path | str, filas: list[dict[str, Any]]) -> int:
-    existentes = {(f.get("corrida"), f.get("modo"), f.get("motor")) for f in _leer_csv(ruta)}
-    nuevas = [f for f in filas if (f.get("corrida"), f.get("modo"), f.get("motor")) not in existentes]
-    if nuevas:
-        _escribir_csv(ruta, COLUMNAS_RESUMEN, nuevas, anexar=True)
-    return len(nuevas)
+    existentes = _leer_csv(ruta)
+    por_clave = {}
+    for i, fila in enumerate(existentes):
+        clave = (fila.get("corrida"), fila.get("modo"), fila.get("motor"))
+        if clave in por_clave:
+            raise ValueError(f"resumen existente con clave duplicada: {clave}")
+        por_clave[clave] = i
+    cambiadas = 0
+    claves_nuevas = set()
+    for fila in filas:
+        clave = (fila.get("corrida"), fila.get("modo"), fila.get("motor"))
+        if clave in claves_nuevas:
+            raise ValueError(f"entrada con clave duplicada en lote de resumen: {clave}")
+        claves_nuevas.add(clave)
+        normalizada = {c: "" if fila.get(c) is None else str(fila.get(c, "")) for c in COLUMNAS_RESUMEN}
+        if clave not in por_clave:
+            por_clave[clave] = len(existentes)
+            existentes.append(normalizada)
+            cambiadas += 1
+            continue
+        i = por_clave[clave]
+        if any(str(existentes[i].get(c) or "") != normalizada[c] for c in COLUMNAS_RESUMEN):
+            existentes[i] = normalizada
+            cambiadas += 1
+    if cambiadas:
+        _escribir_csv(ruta, COLUMNAS_RESUMEN, existentes)
+    return cambiadas
 
 
 # ------------------------------------------------------------------ calibración
@@ -860,10 +1082,27 @@ def importar_gsc(ruta_csv: Path | str, ctx: dict[str, Any]) -> list[dict[str, st
 # ------------------------------------------------------------------ modo API
 def correr_api(prompts: list[dict[str, str]], cfg: dict[str, Any], *, motores_activos: list[str], repeticiones: int, llaves: dict[str, str], dir_datos: Path | str, corrida: str, fecha: date, enviar: Callable[[dict[str, Any]], dict[str, Any]] | None = None) -> dict[str, Any]:
     """Consulta cada motor con llave, guarda el JSON crudo en raw/ y escribe el CSV de respuestas con modo=api."""
+    validar_corrida(corrida)
+    if not 1 <= repeticiones <= 50:
+        raise ValueError("repeticiones debe estar entre 1 y 50")
+    validar_panel(prompts)
+    if not motores_activos or len(set(motores_activos)) != len(motores_activos):
+        raise ValueError("se requiere un panel y una lista de motores no vacía y sin duplicados")
+    for motor in motores_activos:
+        validar_motor_modo(motor, "api")
     enviar = enviar or motores.enviar
     dir_datos = Path(dir_datos)
     raw = dir_datos / "raw"
     raw.mkdir(parents=True, exist_ok=True)
+    ruta_csv = dir_datos / f"respuestas_{fecha.isoformat()}_{corrida}.csv"
+    nombres_raw = {
+        (motor, p["id"], r): f"{corrida}_{motor}_{hashlib.sha256(p['id'].encode('utf-8')).hexdigest()[:12]}_{r}.json"
+        for motor in motores_activos for p in prompts for r in range(1, repeticiones + 1)
+    }
+    colisiones = [str(ruta_csv)] if ruta_csv.exists() else []
+    colisiones.extend(str(raw / nombre) for nombre in nombres_raw.values() if (raw / nombre).exists())
+    if colisiones:
+        raise FileExistsError("salida(s) ya existente(s); no se sobrescriben: " + ", ".join(colisiones[:3]))
     filas: list[dict[str, str]] = []
     errores: list[str] = []
     usados = []
@@ -873,17 +1112,28 @@ def correr_api(prompts: list[dict[str, str]], cfg: dict[str, Any], *, motores_ac
             errores.append(f"{motor}: sin llave en .env; se omite")
             continue
         usados.append(motor)
-        modelo = cfg["motores"][motor]["modelo"]
+        modelo = (cfg.get("motores", {}).get(motor) or {}).get("modelo")
+        if not modelo:
+            raise ValueError(f"falta modelo configurado para {motor}")
         for p in prompts:
             for r in range(1, repeticiones + 1):
                 peticion = motores.construir_peticion(motor, p["prompt"], cfg, llave)
-                crudo = enviar(peticion)
-                (raw / f"{corrida}_{motor}_{p['id']}_{r}.json").write_text(json.dumps({"peticion": {k: v for k, v in peticion.items() if k != "cabeceras"}, "respuesta": crudo, "fecha": datetime.now().isoformat(timespec="seconds")}, ensure_ascii=False, indent=2), encoding="utf-8")
-                ex = motores.extraer_respuesta(motor, crudo, resolver=motores.resolver_redireccion if motor == "gemini" else None)
+                try:
+                    crudo = enviar(peticion)
+                    if not isinstance(crudo, dict):
+                        raise ValueError("el proveedor devolvió un payload que no es objeto JSON")
+                    ex = motores.extraer_respuesta(motor, crudo, resolver=motores.resolver_redireccion if motor == "gemini" else None)
+                except Exception as e:  # noqa: BLE001
+                    crudo = {"error": f"respuesta API inválida: {type(e).__name__}: {e}"}
+                    ex = {"texto": "", "urls_citadas": [], "error": crudo["error"]}
+                nombre_raw = nombres_raw[(motor, p["id"], r)]
+                crudo_json = json.dumps({"peticion": {k: v for k, v in peticion.items() if k != "cabeceras"}, "respuesta": crudo, "fecha": datetime.now().isoformat(timespec="seconds")}, ensure_ascii=False, indent=2)
+                _escribir_texto_atomico(raw / nombre_raw, crudo_json, sobrescribir=False)
+                if not (ex.get("texto") or "").strip() and not ex.get("error"):
+                    ex["error"] = "el proveedor no devolvió texto de respuesta"
                 if ex.get("error"):
                     errores.append(f"{motor} {p['id']} r{r}: {ex['error']}")
                 filas.append({"corrida": corrida, "modo": "api", "fecha": fecha.isoformat(), "motor": motor, "modelo": modelo, "prompt_id": p["id"], "repeticion": str(r), "respuesta": ex["texto"] or ("SIN_RESPUESTA" if ex.get("error") else ""), "urls_citadas": "|".join(ex["urls_citadas"]), "notas": ex.get("error", "")})
-    ruta_csv = dir_datos / f"respuestas_{fecha.isoformat()}_{corrida}.csv"
     _escribir_csv(ruta_csv, COLUMNAS_RESPUESTAS, filas)
     return {"csv": str(ruta_csv), "raw": str(raw), "filas": len(filas), "motores": usados, "errores": errores, "costo_estimado": motores.costo_estimado(n_prompts=len(prompts), motores=usados, repeticiones=repeticiones)}
 
@@ -916,6 +1166,8 @@ def construir_reporte(m: dict[str, Any], filas: list[dict[str, str]], ctx: dict[
     supuestos = []
     if m["con_prompts_ejemplo"]:
         supuestos.append("Se midió con filas de origen=ejemplo (" + ", ".join(m["prompts_ejemplo"]) + "): son prompts añadidos por el skill, no consultas reales del negocio. Sustitúyelas con `importar-gsc` o con preguntas del equipo antes de tomar decisiones.")
+    if m.get("captura_incompleta_forzada"):
+        supuestos.append("La captura se importó incompleta con --forzar; las métricas describen solo las respuestas disponibles y no deben interpretarse como cobertura completa del panel.")
     if not ctx.get("valido"):
         supuestos.append("Contexto de negocio incompleto; faltan: " + ", ".join(ctx.get("faltantes_criticos", [])) + ".")
     if m["variabilidad"]["grupos"] == 0:
@@ -938,7 +1190,14 @@ def construir_reporte(m: dict[str, Any], filas: list[dict[str, str]], ctx: dict[
         d = m["delta"]
         lineas += [f"## Delta contra la corrida anterior del mismo modo ({d['base']['corrida']}, {d['base']['fecha']})", ""]
         if not d.get("comparable_global", True):
-            lineas += [f"El delta global **no es comparable**: la corrida base midió {', '.join(MOTORES.get(x, x) for x in d['motores_base'])} y esta corrida midió {', '.join(MOTORES.get(x, x) for x in d['motores_actual'])}. Lee solo el delta por motor.", ""]
+            causas = []
+            if d["motores_base"] != d["motores_actual"]:
+                causas.append(f"motores base={', '.join(MOTORES.get(x, x) for x in d['motores_base'])}; actuales={', '.join(MOTORES.get(x, x) for x in d['motores_actual'])}")
+            if not d.get("comparable_panel", False):
+                causas.append("panel de prompts distinto, captura incompleta o sin huella en el histórico")
+            if not d.get("comparable_modelos", False):
+                causas.append("modelo(s) distintos o sin metadata comparable")
+            lineas += ["El delta global **no es comparable**: " + "; ".join(causas) + ". Solo se muestran deltas por motor cuando panel y modelo coinciden.", ""]
         lineas += [_md_tabla(["Métrica", "Delta (puntos)"], [[k, f"{round(100 * val):+d}" if val is not None else "sin dato"] for k, val in d["global"].items()]), ""]
         if d.get("por_motor"):
             lineas += [_md_tabla(["Motor", "Share of answers", "Tasa de citación"], [[MOTORES.get(mo, mo), f"{round(100 * v['share_of_answers']):+d}", f"{round(100 * v['tasa_citacion']):+d}"] for mo, v in d["por_motor"].items()]), ""]
@@ -979,7 +1238,7 @@ def construir_reporte(m: dict[str, Any], filas: list[dict[str, str]], ctx: dict[
     lineas += ["## Panel de prompts", "", _md_tabla(["Id", "Prompt", "Etapa", "Intención", "Origen"], [[p["id"], p["prompt"], p.get("etapa", ""), p.get("intencion", ""), p.get("origen", "")] for p in prompts if p["id"] in {f.get("prompt_id") for f in filas}]), ""]
     lineas += ["## Método", "", "Panel fijo de prompts por intención, etapa, persona e idioma (V-01); mención y cita se miden por separado (V-02); competidores y frases textuales por respuesta (V-03); AI Overviews solo por captura manual (V-04); AI Overviews y asistentes se miden por separado (V-05). Las respuestas no son deterministas: la variabilidad entre repeticiones acompaña a cada métrica. Nunca se presentan impactos proyectados numéricos.", "", "AI Overviews requiere captura humana (V-04): en una prueba propia del 2026-09-12 con 18 prompts, una captura por agente automatizado devolvió 16 de 18 SIN_AIO con el mensaje «No se puede generar una Visión general creada por IA en este momento», mientras que la misma tanda capturada a mano en ventana de incógnito devolvió 18 de 18 con resumen. La ausencia de resumen en una captura automatizada no es evidencia de que Google no lo genere. Sus fuentes llegan como enlaces google.com/goto opacos: la citación de AIO queda como desconocida, no como cero, y sus dominios no entran al conteo; la mención se mide normal sobre el texto.", ""]
     payload = {
-        "meta": {"fecha": fecha.isoformat(), "dominio": dominio, "modulo": "visibilidad", "version_skill": VERSION, "corrida": m["corrida"], "modo": m["modo"], "contexto_valido": ctx.get("valido", False)},
+        "meta": {"fecha": fecha.isoformat(), "dominio": dominio, "modulo": "visibilidad", "version_skill": VERSION, "corrida": m["corrida"], "modo": m["modo"], "contexto_valido": ctx.get("valido", False), "modelos_por_motor": m.get("modelos_por_motor", {}), "huella_panel": m.get("huella_panel", "")},
         "titular": titular,
         "supuestos": supuestos,
         "metricas": m,
@@ -994,11 +1253,20 @@ def construir_reporte(m: dict[str, Any], filas: list[dict[str, str]], ctx: dict[
     return payload
 
 
-def escribir_reporte(payload: dict[str, Any], *, directorio: Path | str | None = None, corrida: str) -> dict[str, str]:
+def escribir_reporte(payload: dict[str, Any], *, directorio: Path | str | None = None, corrida: str, sobrescribir: bool = False) -> dict[str, str]:
     """Escribe el reporte (md y json) y el archivo de vector para geo-visibilidad en salidas/tmp/<corrida>/visibilidad.json."""
     directorio = Path(directorio) if directorio else RUTA_SALIDAS
-    rutas = reporte.escribir(payload, directorio=directorio)
+    corrida = validar_corrida(corrida)
+    if validar_corrida(payload.get("meta", {}).get("corrida", "")) != corrida:
+        raise ValueError("corrida del reporte no coincide con el argumento")
+    nombre = f"{reporte.nombre_archivo(payload['meta']['dominio'], 'visibilidad', date.fromisoformat(payload['meta']['fecha']))}_{corrida}"
     dir_tmp = directorio / "tmp" / corrida
+    ruta_vector = dir_tmp / "visibilidad.json"
+    rutas = {"md": str(directorio / f"{nombre}.md"), "json": str(directorio / f"{nombre}.json"), "vector": str(ruta_vector)}
+    if not sobrescribir and (Path(rutas["md"]).exists() or Path(rutas["json"]).exists() or ruta_vector.exists()):
+        raise FileExistsError(f"ya existen salidas para la corrida {corrida}; no se sobrescriben")
+    payload.setdefault("meta", {})["archivos"] = rutas
+    reporte.escribir(payload, directorio=directorio, nombre=nombre, sobrescribir=sobrescribir)
     dir_tmp.mkdir(parents=True, exist_ok=True)
     marca = payload.get("marca", {})
     filas = payload.get("respuestas", [])
@@ -1012,15 +1280,15 @@ def escribir_reporte(payload: dict[str, Any], *, directorio: Path | str | None =
         "competidores": marca.get("competidores", []),
         "corrida": corrida,
         "modo": payload["meta"].get("modo", ""),
-        "metricas_resumen": {"global": payload["metricas"]["global"], "por_motor": payload["metricas"]["por_motor"], "por_marca": payload["metricas"].get("por_marca"), "observaciones": payload["metricas"]["observaciones"], "faltantes": payload["metricas"].get("faltantes")},
+        "modelos_por_motor": payload["meta"].get("modelos_por_motor", {}),
+        "huella_panel": payload["meta"].get("huella_panel", ""),
+        "metricas_resumen": {"global": payload["metricas"]["global"], "por_motor": payload["metricas"]["por_motor"], "por_marca": payload["metricas"].get("por_marca"), "observaciones": payload["metricas"]["observaciones"], "faltantes": payload["metricas"].get("faltantes"), "captura_incompleta_forzada": payload["metricas"].get("captura_incompleta_forzada", False)},
         "a_verificar": {"geografia_ajena": payload["metricas"].get("geografia_ajena", []), "nota": "Conteos medidos de señales de otro país en las respuestas. Verifica leyendo las frases si el motor respondió para otro mercado y si el patrón se repite en prompts sin marca; si aplica, repórtalo como hallazgo de método (V-01, panel y ubicación) etiquetado Hipótesis."},
         "reglas": _reglas_v(),
         "guia": referencias.guia(),
         "respuestas": [{"respuesta_id": respuesta_id(f), "motor": f.get("motor"), "prompt_id": f.get("prompt_id"), "prompt": f.get("prompt"), "prompt_con_marca": f.get("prompt_con_marca") == "1", "etapa": f.get("etapa"), "repeticion": f.get("repeticion"), "mencion": f.get("mencion") == "1", "cita": f.get("cita") == "1", "competidores_mencionados": [c for c in (f.get("competidores_mencionados") or "").split(";") if c], "geografia_ajena": [x for x in (f.get("geografia_ajena_paises") or "").split(";") if x], "frases_marca": [f.get("frase_marca")] if f.get("frase_marca") else [], "precision_actual": f.get("precision", "sin_evaluar")} for f in filas if (f.get("estado") or "respuesta") != "sin_respuesta"],
     }
-    ruta_vector = dir_tmp / "visibilidad.json"
-    ruta_vector.write_text(json.dumps(vector, ensure_ascii=False, indent=2), encoding="utf-8")
-    rutas["vector"] = str(ruta_vector)
+    _escribir_texto_atomico(ruta_vector, json.dumps(vector, ensure_ascii=False, indent=2), sobrescribir=sobrescribir)
     return rutas
 
 
@@ -1029,16 +1297,32 @@ def validar_salida_subagente(salida: dict[str, Any]) -> list[str]:
     errores = []
     if not isinstance(salida, dict) or "precision" not in salida:
         return ["la salida debe ser un objeto con la clave 'precision'"]
-    for i, p in enumerate(salida.get("precision") or []):
+    if salida.get("vector") not in (None, "visibilidad"):
+        errores.append("vector debe ser 'visibilidad'")
+    precision = salida.get("precision") or []
+    hallazgos = salida.get("hallazgos") or []
+    if not isinstance(precision, list):
+        return ["'precision' debe ser una lista"]
+    if not isinstance(hallazgos, list):
+        return ["'hallazgos' debe ser una lista"]
+    for i, p in enumerate(precision):
+        if not isinstance(p, dict):
+            errores.append(f"precision {i}: debe ser un objeto")
+            continue
         if p.get("clasificacion") not in ("correcta", "parcial", "incorrecta"):
             errores.append(f"precision {i}: clasificacion inválida")
         if not p.get("respuesta_id"):
             errores.append(f"precision {i}: falta respuesta_id")
         if _IMPACTO_RE.search((p.get("motivo") or "") + (p.get("frase") or "")):
             errores.append(f"precision {i}: contiene impacto proyectado numérico (prohibido)")
-    for i, h in enumerate(salida.get("hallazgos") or []):
+    for i, h in enumerate(hallazgos):
+        if not isinstance(h, dict):
+            errores.append(f"hallazgo {i}: debe ser un objeto")
+            continue
         if h.get("evidencia_observacion") not in ("Hipótesis",):
             errores.append(f"hallazgo {i}: los hallazgos de visibilidad del subagente son Hipótesis")
+        if h.get("regla_id") not in {r["regla_id"] for r in _reglas_v()}:
+            errores.append(f"hallazgo {i}: regla_id fuera del conjunto de reglas de visibilidad")
         if _IMPACTO_RE.search((h.get("detalle") or "") + (h.get("recomendacion") or "")):
             errores.append(f"hallazgo {i}: contiene impacto proyectado numérico (prohibido)")
     return errores
@@ -1046,13 +1330,29 @@ def validar_salida_subagente(salida: dict[str, Any]) -> list[str]:
 
 def fusionar(ruta_historial: Path | str, salida: dict[str, Any], *, corrida: str, ctx: dict[str, Any], prompts: list[dict[str, str]], fecha: date, directorio: Path | str | None = None, resumen_previo: Path | str | None = None, calibracion: dict[str, Any] | None = None) -> dict[str, Any]:
     """Aplica la clasificación de precisión del subagente (Hipótesis) al historial y regenera métricas y reporte."""
+    corrida = validar_corrida(corrida)
     errores = validar_salida_subagente(salida)
     if errores:
         raise ValueError("salida de subagente inválida: " + "; ".join(errores))
+    if salida.get("corrida") and salida["corrida"] != corrida:
+        raise ValueError("la corrida de la salida del subagente no coincide")
     filas = _leer_csv(ruta_historial)
-    por_id = {p["respuesta_id"]: p for p in salida.get("precision") or []}
+    filas_corrida = [f for f in filas if f.get("corrida") == corrida]
+    por_id_historial = {respuesta_id(f): f for f in filas_corrida}
+    if len(por_id_historial) != len(filas_corrida):
+        raise ValueError(f"el historial tiene respuesta_id duplicados en la corrida {corrida}")
+    if not filas_corrida:
+        raise ValueError(f"no hay respuestas en historial para la corrida {corrida}")
+    por_id = {}
+    for p in salida.get("precision") or []:
+        rid = p["respuesta_id"]
+        if rid in por_id:
+            raise ValueError(f"la salida del subagente repite respuesta_id: {rid}")
+        if rid not in por_id_historial:
+            raise ValueError(f"respuesta_id desconocido o de otra corrida en la salida del subagente: {rid}")
+        por_id[rid] = p
     for f in filas:
-        p = por_id.get(respuesta_id(f))
+        p = por_id.get(respuesta_id(f)) if f.get("corrida") == corrida else None
         if p:
             f["precision"] = p["clasificacion"]
             f["precision_evidencia"] = "Hipótesis"
@@ -1061,6 +1361,5 @@ def fusionar(ruta_historial: Path | str, salida: dict[str, Any], *, corrida: str
     de_corrida = [f for f in filas if f.get("corrida") == corrida]
     m = metricas(de_corrida, corrida=corrida, resumen_previo=resumen_previo, ctx=ctx)
     payload = construir_reporte(m, de_corrida, ctx, prompts, fecha=fecha, calibracion=calibracion, hallazgos_subagente=salida.get("hallazgos") or [], notas=salida.get("notas") or [])
-    rutas = escribir_reporte(payload, directorio=directorio, corrida=corrida)
-    payload["meta"]["archivos"] = rutas
+    rutas = escribir_reporte(payload, directorio=directorio, corrida=corrida, sobrescribir=True)
     return payload

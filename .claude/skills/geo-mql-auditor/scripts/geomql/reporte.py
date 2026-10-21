@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -276,13 +278,41 @@ def construir(
     return payload
 
 
-def escribir(payload: dict[str, Any], *, directorio: Path | str | None = None, nombre: str | None = None) -> dict[str, str]:
+def _escribir_atomico(ruta: Path, contenido: str, *, sobrescribir: bool = False) -> None:
+    fd, temporal = tempfile.mkstemp(prefix=f".{ruta.name}.", suffix=".tmp", dir=ruta.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(contenido)
+            f.flush()
+            os.fsync(f.fileno())
+        if sobrescribir:
+            os.replace(temporal, ruta)
+        else:
+            os.link(temporal, ruta)
+            os.unlink(temporal)
+    finally:
+        if os.path.exists(temporal):
+            os.unlink(temporal)
+
+
+def escribir(payload: dict[str, Any], *, directorio: Path | str | None = None, nombre: str | None = None, sobrescribir: bool = False) -> dict[str, str]:
     directorio = Path(directorio) if directorio else RUTA_SALIDAS
     directorio.mkdir(parents=True, exist_ok=True)
     nombre = nombre or nombre_archivo(payload["meta"]["dominio"], payload["meta"]["modulo"], date.fromisoformat(payload["meta"]["fecha"]))
     ruta_md = directorio / f"{nombre}.md"
     ruta_json = directorio / f"{nombre}.json"
-    ruta_md.write_text(payload["markdown"], encoding="utf-8")
+    if not sobrescribir and (ruta_md.exists() or ruta_json.exists()):
+        raise FileExistsError(f"el reporte ya existe: {ruta_md} o {ruta_json}; elige otro --sufijo/corrida")
     sin_md = {k: v for k, v in payload.items() if k != "markdown"}
-    ruta_json.write_text(json.dumps(sin_md, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    creados = []
+    try:
+        _escribir_atomico(ruta_md, payload["markdown"], sobrescribir=sobrescribir)
+        creados.append(ruta_md)
+        _escribir_atomico(ruta_json, json.dumps(sin_md, ensure_ascii=False, indent=2, default=str), sobrescribir=sobrescribir)
+        creados.append(ruta_json)
+    except Exception:
+        if not sobrescribir:
+            for ruta in creados:
+                ruta.unlink(missing_ok=True)
+        raise
     return {"md": str(ruta_md), "json": str(ruta_json)}

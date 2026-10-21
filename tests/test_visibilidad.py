@@ -45,6 +45,16 @@ def test_panel_de_prompts_sale_del_contexto_con_origen_contexto(ctx):
     assert set(visibilidad.COLUMNAS_PROMPTS) == set(filas[0])
 
 
+def test_panel_rechaza_ids_de_ruta_o_duplicados(ctx):
+    prompts = visibilidad.prompts_desde_contexto(ctx)
+    prompts[1]["id"] = prompts[0]["id"]
+    with pytest.raises(ValueError, match="duplicado"):
+        visibilidad.validar_panel(prompts)
+    prompts[1]["id"] = "../fuera"
+    with pytest.raises(ValueError, match="ID"):
+        visibilidad.validar_panel(prompts)
+
+
 def test_escribir_prompts_no_sobrescribe_y_marca_ejemplo(ctx, datos):
     ruta = datos / "prompts.csv"
     n = visibilidad.escribir_prompts(ruta, visibilidad.prompts_desde_contexto(ctx))
@@ -100,6 +110,7 @@ def test_hoja_de_captura_cubre_prompt_motor_repeticion_y_aio_solo_manual(ctx, da
 
 def test_captura_no_incluye_aio_en_modo_api(ctx):
     cfg = visibilidad.config_desde_contexto(ctx)
+    assert "aio" not in visibilidad.motores_para("api", None, cfg)
     with pytest.raises(ValueError):
         visibilidad.motores_para("api", ["chatgpt", "aio"], cfg)
     assert visibilidad.motores_para("manual", ["chatgpt", "aio"], cfg) == ["chatgpt", "aio"]
@@ -159,14 +170,37 @@ def test_metricas_delta_solo_contra_corrida_anterior_del_mismo_modo(ctx, datos):
     resumen = datos / "resumen.csv"
     # una corrida API previa con share alto no debe usarse como base de una corrida manual
     visibilidad.anexar_resumen(resumen, [{"corrida": "a0", "modo": "api", "fecha": "2026-09-01", "motor": "global", "n_prompts": 2, "n_respuestas": 8, "share_of_answers": 0.9, "tasa_citacion": 0.9, "share_of_voice": 0.9, "acuerdo_mencion": 1.0, "acuerdo_cita": 1.0, "con_prompts_ejemplo": 0}])
-    visibilidad.anexar_resumen(resumen, [{"corrida": "m0", "modo": "manual", "fecha": "2026-09-05", "motor": "global", "n_prompts": 2, "n_respuestas": 8, "share_of_answers": 0.25, "tasa_citacion": 0.25, "share_of_voice": 0.2, "acuerdo_mencion": 1.0, "acuerdo_cita": 1.0, "con_prompts_ejemplo": 0}])
+    m0 = visibilidad.metricas(filas, corrida="m1")
+    base = visibilidad.filas_resumen(m0, fecha=date(2026, 9, 5))
+    for f in base:
+        f["corrida"] = "m0"
+        if f["motor"] == "global":
+            f["share_of_answers"] = 0.25
+            f["tasa_citacion"] = 0.25
+            f["share_of_voice"] = 0.2
+    visibilidad.anexar_resumen(resumen, base)
     m = visibilidad.metricas(filas, corrida="m1", resumen_previo=resumen)
     assert m["delta"]["base"]["corrida"] == "m0" and m["delta"]["base"]["modo"] == "manual"
     assert m["delta"]["global"]["share_of_answers"] == 0.25
     filas_resumen = visibilidad.filas_resumen(m, fecha=date(2026, 9, 11))
     assert all(f["modo"] == "manual" for f in filas_resumen) and any(f["motor"] == "global" for f in filas_resumen)
     visibilidad.anexar_resumen(resumen, filas_resumen)
-    assert len(_leer_csv(resumen)) == 2 + len(filas_resumen)
+    assert len(_leer_csv(resumen)) == 1 + len(base) + len(filas_resumen)
+    assert visibilidad.anexar_resumen(resumen, filas_resumen) == 0
+
+
+def test_delta_no_compara_una_corrida_forzada_incompleta(ctx, datos):
+    prompts = visibilidad.prompts_desde_contexto(ctx)
+    filas = visibilidad.analizar(FIX / "visibilidad" / "respuestas_manual.csv", ctx, prompts)
+    base = visibilidad.filas_resumen(visibilidad.metricas(filas, corrida="m1"), fecha=date(2026, 9, 5))
+    for f in base:
+        f["corrida"] = "m0"
+        f["captura_incompleta_forzada"] = "1"
+    resumen = datos / "base_incompleta.csv"
+    visibilidad.anexar_resumen(resumen, base)
+    m = visibilidad.metricas(filas, corrida="m1", resumen_previo=resumen)
+    assert m["delta"]["comparable_global"] is False
+    assert m["delta"]["global"] == {} and m["delta"]["por_motor"] == {}
 
 
 def test_metricas_advierten_prompts_de_ejemplo(ctx):
@@ -271,14 +305,42 @@ def test_correr_api_con_http_mockeado_guarda_crudo_y_respuestas(ctx, datos, monk
     filas = _leer_csv(res["csv"])
     assert len(filas) == 4 and all(f["modo"] == "api" and f["modelo"] == "gpt-5-nano" and f["corrida"] == "a1" for f in filas)
     assert len(list((datos / "raw").glob("a1_chatgpt_*.json"))) == 4
-    assert res["costo_estimado"]["busquedas"] == 4 and res["costo_estimado"]["usd_busquedas_maximo"] == round(4 * 10 / 1000, 4)
+    assert res["costo_estimado"]["busquedas"] is None and res["costo_estimado"]["usd_busquedas_maximo"] is None
+    assert res["costo_estimado"]["usos_maximos_desconocidos"] == ["chatgpt"]
+
+
+def test_correr_api_rechaza_prompt_de_ruta_y_cuenta_payload_vacio_como_faltante(ctx, tmp_path):
+    cfg = visibilidad.config_desde_contexto(ctx)
+    prompts = visibilidad.prompts_desde_contexto(ctx)[:1]
+    mal = [dict(prompts[0], id="../escape")]
+    llamadas = []
+    with pytest.raises(ValueError):
+        visibilidad.correr_api(mal, cfg, motores_activos=["chatgpt"], repeticiones=1, llaves={"OPENAI_API_KEY": "k"}, dir_datos=tmp_path / "invalido", corrida="a1", fecha=date(2026, 9, 11), enviar=lambda p: llamadas.append(p))
+    assert not llamadas and not (tmp_path / "invalido").exists()
+    res = visibilidad.correr_api(prompts, cfg, motores_activos=["chatgpt"], repeticiones=1, llaves={"OPENAI_API_KEY": "k"}, dir_datos=tmp_path / "api", corrida="a2", fecha=date(2026, 9, 11), enviar=lambda p: {"unexpected": []})
+    filas = _leer_csv(res["csv"])
+    assert filas[0]["respuesta"] == visibilidad.SIN_RESPUESTA and "no devolvió texto" in filas[0]["notas"]
+    assert res["errores"] and len(list((tmp_path / "api" / "raw").glob("a2_chatgpt_*.json"))) == 1
 
 
 def test_costo_estimado_documenta_tarifas():
     c = motores.costo_estimado(n_prompts=10, motores=["chatgpt", "claude", "gemini"], repeticiones=3, busquedas_por_respuesta=1)
     assert c["respuestas"] == 90 and c["busquedas"] == 90
-    assert c["usd_busquedas_maximo"] == round(60 * 10 / 1000, 4), "OpenAI y Anthropic cobran USD 10 por 1000 búsquedas; Gemini tiene cuota gratuita"
-    assert "tokens" in c["nota"].lower()
+    assert c["usd_busquedas_conocido"] == round(60 * 10 / 1000, 4)
+    assert c["usd_busquedas_maximo"] is None and c["tarifas_desconocidas"] == ["gemini"]
+    assert "tokens" in c["nota"].lower() and "no se informa" in c["nota"].lower()
+
+
+def test_costo_claude_usa_maximo_fijado_en_la_peticion():
+    c = motores.costo_estimado(n_prompts=2, motores=["claude"], repeticiones=3)
+    assert c["busquedas"] == 30  # max_uses=5 está fijado en el cuerpo de la petición
+    assert c["usd_busquedas_maximo"] == 0.3
+
+
+def test_costo_chatgpt_no_finge_un_maximo_de_busquedas():
+    c = motores.costo_estimado(n_prompts=2, motores=["chatgpt"], repeticiones=3)
+    assert c["busquedas"] is None and c["usd_busquedas_maximo"] is None
+    assert c["usos_maximos_desconocidos"] == ["chatgpt"]
 
 
 # ------------------------------------------------------------- reporte y vector
@@ -295,12 +357,17 @@ def test_reporte_visibilidad_titular_con_metricas_y_advertencia_de_ejemplo(ctx, 
     assert "no se mezclan" in md.lower() or "mismo modo" in md.lower()
     assert "proxy" in md.lower()
     rutas = visibilidad.escribir_reporte(payload, directorio=tmp_path / "salidas", corrida="m1")
-    assert Path(rutas["md"]).name == "2026-09-11_nominaejemplo.example_visibilidad.md"
+    assert Path(rutas["md"]).name == "2026-09-11_nominaejemplo.example_visibilidad_m1.md"
+    reporte_json = json.loads(Path(rutas["json"]).read_text(encoding="utf-8"))
+    assert reporte_json["meta"]["archivos"] == rutas
+    assert reporte_json["meta"]["huella_panel"] == m["huella_panel"]
     vector = json.loads(Path(rutas["vector"]).read_text(encoding="utf-8"))
     assert vector["descripcion_oficial"].startswith("Software de nómina") and len(vector["respuestas"]) == 8
     assert all(r["frases_marca"] is not None and "respuesta_id" in r for r in vector["respuestas"])
     assert {r["regla_id"] for r in vector["reglas"]} == {"V-01", "V-02", "V-03", "V-04", "V-05"} and vector["reglas"][0]["fuentes"][0]["url"]
     assert "guia" in vector
+    with pytest.raises(FileExistsError):
+        visibilidad.escribir_reporte(payload, directorio=tmp_path / "salidas", corrida="m1")
 
 
 def test_fusionar_precision_del_subagente_queda_como_hipotesis(ctx, datos, tmp_path):
@@ -318,6 +385,8 @@ def test_fusionar_precision_del_subagente_queda_como_hipotesis(ctx, datos, tmp_p
     assert "requiere revisión humana" in res["markdown"].lower() or "revisión humana" in res["markdown"].lower()
     with pytest.raises(ValueError):
         visibilidad.fusionar(ruta_h, {"vector": "visibilidad", "precision": [{"respuesta_id": rid, "clasificacion": "correcta", "frase": "x", "motivo": "subirá +20% de citas"}], "hallazgos": [], "notas": []}, corrida="m1", ctx=ctx, prompts=prompts, fecha=date(2026, 9, 11), directorio=tmp_path / "s2")
+    with pytest.raises(ValueError, match="desconocido"):
+        visibilidad.fusionar(ruta_h, {"vector": "visibilidad", "precision": [{"respuesta_id": "ID-INEXISTENTE", "clasificacion": "correcta", "frase": "x", "motivo": "m"}], "hallazgos": [], "notas": []}, corrida="m1", ctx=ctx, prompts=prompts, fecha=date(2026, 9, 11), directorio=tmp_path / "s3")
 
 
 # ------------------------------------------------------------- CLI de punta a punta (sin red)
@@ -339,7 +408,7 @@ def test_cli_flujo_manual_completo(tmp_path, capsys):
     assert cli.main(base + ["metricas", "--corrida", "m1"]) == 0
     salida = capsys.readouterr().out
     assert "share of answers 50%" in salida and "Reporte:" in salida
-    assert (salidas / "2026-09-11_nominaejemplo.example_visibilidad.md").exists() and (salidas / "tmp" / "m1" / "visibilidad.json").exists()
+    assert (salidas / "2026-09-11_nominaejemplo.example_visibilidad_m1.md").exists() and (salidas / "tmp" / "m1" / "visibilidad.json").exists()
     assert (datos / "historial.csv").exists() and (datos / "resumen.csv").exists()
     assert cli.main(base + ["importar-gsc", "--csv", str(FIX / "visibilidad" / "gsc_consultas.csv"), "--aplicar"]) == 0
     assert any(p["origen"] == "gsc" for p in visibilidad.cargar_prompts(datos / "prompts.csv"))
@@ -415,9 +484,10 @@ def test_reporte_separa_con_y_sin_marca_dominios_y_geografia(ctx, tmp_path):
     resumen = {(d["dominio"], d["veces"], d["competidor"]) for d in dom}
     assert ("competidora.example", 1, "CompetidorA") in resumen and ("competidorb.example", 1, "CompetidorB") in resumen
     assert m["dominios_por_motor"]["chatgpt"][0]["competidor"] == "" and m["dominios_por_motor"]["chatgpt"][0]["propio"] in (True, False)
-    assert [r["respuesta_id"] for r in m["respuestas_competidor_sin_marca"]] == ["m1/perplexity/P002/1"]
+    id_competidor = json.loads(m["respuestas_competidor_sin_marca"][0]["respuesta_id"])
+    assert id_competidor == ["m1", "manual", "perplexity", "interfaz web", "P002", "1"]
     geo = m["geografia_ajena"]
-    assert len(geo) == 1 and geo[0]["respuesta_id"] == "m1/perplexity/P002/1" and "Perú" in geo[0]["paises"] and "utp" in [t.lower() for t in geo[0]["terminos"]]
+    assert len(geo) == 1 and geo[0]["respuesta_id"] == m["respuestas_competidor_sin_marca"][0]["respuesta_id"] and "Perú" in geo[0]["paises"] and "utp" in [t.lower() for t in geo[0]["terminos"]]
     md = visibilidad.construir_reporte(m, filas, ctx, prompts, fecha=date(2026, 9, 11))["markdown"]
     assert "Sin marca" in md and "Con marca" in md and "Dominios citados por motor" in md and "Señales geográficas de otro país" in md and "Perú" in md
     assert "Competidor mencionado y marca ausente" in md
@@ -439,16 +509,21 @@ def test_cli_importar_captura(tmp_path, capsys):
     datos = tmp_path / "datos"
     base = ["--contexto", str(FIX / "negocio_lleno.md"), "--datos", str(datos), "--fecha", "2026-09-11", "--salidas", str(tmp_path / "s")]
     assert cli.main(base + ["prompts"]) == 0
-    assert cli.main(base + ["importar-captura", "--csv", str(FIX / "visibilidad" / "captura_externa_bom.csv"), "--corrida", "m1"]) == 0
+    assert cli.main(base + ["importar-captura", "--csv", str(FIX / "visibilidad" / "captura_externa_bom.csv"), "--corrida", "m1"]) == 2
+    destino = datos / "respuestas_2026-09-11_m1.csv"
+    assert not destino.exists(), "una captura parcial no se escribe sin override explícito"
+    assert cli.main(base + ["importar-captura", "--csv", str(FIX / "visibilidad" / "captura_externa_bom.csv"), "--corrida", "m1", "--forzar"]) == 0
     out = capsys.readouterr().out
     assert "Pregunta distinta al panel en perplexity/P002" in out and "SIN_RESPUESTA en perplexity/P001" in out and "faltantes" in out.lower()
-    destino = datos / "respuestas_2026-09-11_m1.csv"
     assert destino.exists() and len(_leer_csv(destino)) == 4
+    assert all(visibilidad.MARCA_CAPTURA_INCOMPLETA in f["notas"] for f in _leer_csv(destino))
     # no sobrescribe un CSV con respuestas sin --forzar
     assert cli.main(base + ["importar-captura", "--csv", str(FIX / "visibilidad" / "captura_externa_bom.csv"), "--corrida", "m1"]) == 2
     assert cli.main(base + ["analizar", "--respuestas", str(destino)]) == 0
     assert cli.main(base + ["metricas", "--corrida", "m1"]) == 0
     assert "faltantes fuera del denominador: 1" in capsys.readouterr().out
+    reporte_md = next((tmp_path / "s").glob("*_visibilidad_m1.md")).read_text(encoding="utf-8")
+    assert "se importó incompleta con --forzar" in reporte_md.lower()
 
 
 def test_dominios_por_motor_subdominio_propio_no_es_competidor(ctx):

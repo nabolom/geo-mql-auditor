@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from datetime import datetime
 from typing import Any
 
 from .html import Documento, texto_de
@@ -112,7 +113,13 @@ def _campos(nodo: dict[str, Any], requeridos: list[str], indice_ids: dict[str, d
 
 
 def _fecha_iso_con_zona(v: Any) -> bool:
-    return isinstance(v, str) and bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2}))?", v))
+    if not isinstance(v, str) or "T" not in v:
+        return False
+    try:
+        fecha = datetime.fromisoformat(v[:-1] + "+00:00" if v.endswith("Z") else v)
+    except ValueError:
+        return False
+    return fecha.tzinfo is not None and fecha.utcoffset() is not None
 
 
 def _visible(texto_norm: str, valor: Any) -> bool:

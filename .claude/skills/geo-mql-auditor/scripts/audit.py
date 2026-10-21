@@ -112,7 +112,12 @@ def cmd_fusionar(args: argparse.Namespace) -> int:
 
 
 def cmd_resumen(args: argparse.Namespace) -> int:
-    ruta = RUTA_SALIDAS / "tmp" / args.corrida / f"{args.vector}.json"
+    corrida = auditoria.validar_corrida(args.corrida)
+    raiz_tmp = RUTA_SALIDAS.resolve() / "tmp"
+    ruta = raiz_tmp / corrida / f"{args.vector}.json"
+    if not ruta.resolve().is_relative_to(raiz_tmp):
+        print("La ruta de corrida sale de salidas/tmp", file=sys.stderr)
+        return 2
     if not ruta.exists():
         print(f"No existe {ruta}", file=sys.stderr)
         return 1
@@ -155,6 +160,13 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     if args.cmd == "correr" and not (args.url or args.sitemap or args.urls):
         p.error("indica --url, --urls o --sitemap")
+    if args.cmd == "correr":
+        if args.workers < 1 or args.workers > 16:
+            p.error("--workers debe estar entre 1 y 16")
+        if args.max_urls < 1 or args.max_urls > sitemap.MAX_URLS_MUESTREO:
+            p.error(f"--max-urls debe estar entre 1 y {sitemap.MAX_URLS_MUESTREO}")
+        if args.urls and len(args.urls) > sitemap.MAX_URLS_MUESTREO:
+            p.error(f"--urls admite hasta {sitemap.MAX_URLS_MUESTREO} URLs")
     return args.fn(args)
 
 

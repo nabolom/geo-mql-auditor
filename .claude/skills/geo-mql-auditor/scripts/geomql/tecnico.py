@@ -183,6 +183,12 @@ def analizar_sitemap(recoleccion: dict[str, Any] | None, *, ahora: datetime | No
         "lastmod_futuras": futuras,
         "errores": recoleccion.get("errores", []),
         "sitemaps_leidos": recoleccion.get("sitemaps_leidos", 0),
+        "entrada_truncada": recoleccion.get("entrada_truncada", False),
+        "limite_bytes": recoleccion.get("limite_bytes", False),
+        "exceso_bytes": recoleccion.get("exceso_bytes", False),
+        "exceso_urls": recoleccion.get("exceso_urls", False),
+        "bytes_max": recoleccion.get("bytes_max", 0),
+        "cobertura_completa": recoleccion.get("cobertura_completa", not recoleccion.get("errores")),
         "declarado_en_robots": declarado_en_robots,
     }
 

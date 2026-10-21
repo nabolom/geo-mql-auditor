@@ -6,23 +6,28 @@ configurable, límite de tamaño, soporte de file:// para fixturas y caché loca
 """
 from __future__ import annotations
 
-import gzip
 import hashlib
+import http.client
 import json
 import re
+import socket
 import time
 import zlib
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse, urlunparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener, url2pathname
+from urllib.request import HTTPHandler, HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener, url2pathname
+
+from . import RAIZ_PROYECTO
+from .seguridad_red import conectar_fijado, destinos_publicos
 
 UA_POR_DEFECTO = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 geo-mql-auditor/0.1"
 )
 MAX_BYTES_POR_DEFECTO = 5_000_000
+MAX_BYTES_ABSOLUTO = 50_000_000
 
 _META_CHARSET_RE = re.compile(rb'<meta[^>]+charset=["\']?\s*([a-zA-Z0-9_\-]+)', re.IGNORECASE)
 
@@ -35,8 +40,40 @@ class _RegistroRedirecciones(HTTPRedirectHandler):
         self.cadena: list[dict[str, Any]] = []
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        destinos_publicos(newurl)
         self.cadena.append({"de": req.full_url, "a": newurl, "codigo": code})
         return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+class _HTTPFijado(HTTPHandler):
+    """HTTP directo que conecta al sockaddr público ya validado (sin proxy ambiental)."""
+
+    def http_open(self, req):
+        _, _, destinos = destinos_publicos(req.full_url)
+
+        class _Conexion(http.client.HTTPConnection):
+            def connect(self):
+                self.sock = conectar_fijado(destinos, self.timeout, self.source_address)
+
+        return self.do_open(_Conexion, req)
+
+
+class _HTTPSFijado(HTTPSHandler):
+    """HTTPS con IP fijada y hostname original conservado para SNI/certificado."""
+
+    def https_open(self, req):
+        _, _, destinos = destinos_publicos(req.full_url)
+
+        class _Conexion(http.client.HTTPSConnection):
+            def connect(self):
+                sock = conectar_fijado(destinos, self.timeout, self.source_address)
+                if self._tunnel_host:
+                    self.sock = sock
+                    self._tunnel()
+                    sock = self.sock
+                self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+        return self.do_open(_Conexion, req, context=self._context, check_hostname=self._check_hostname)
 
 
 def _cabecera(cabeceras: dict[str, str], nombre: str) -> str:
@@ -64,19 +101,32 @@ def _decodificar(cuerpo: bytes, charset: str) -> str:
     return cuerpo.decode("utf-8", errors="replace")
 
 
-def _descomprimir(cuerpo: bytes, codificacion: str) -> bytes:
+def _descomprimir_limitado(cuerpo: bytes, codificacion: str, max_bytes: int) -> tuple[bytes, bool]:
     codificacion = (codificacion or "").lower()
     try:
         if codificacion == "gzip":
-            return gzip.decompress(cuerpo)
+            dec = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            salida = dec.decompress(cuerpo, max_bytes + 1)
+            return salida[:max_bytes], len(salida) > max_bytes or bool(dec.unconsumed_tail)
         if codificacion == "deflate":
             try:
-                return zlib.decompress(cuerpo)
+                dec = zlib.decompressobj()
             except zlib.error:
-                return zlib.decompress(cuerpo, -zlib.MAX_WBITS)
+                dec = zlib.decompressobj(-zlib.MAX_WBITS)
+            try:
+                salida = dec.decompress(cuerpo, max_bytes + 1)
+            except zlib.error:
+                dec = zlib.decompressobj(-zlib.MAX_WBITS)
+                salida = dec.decompress(cuerpo, max_bytes + 1)
+            return salida[:max_bytes], len(salida) > max_bytes or bool(dec.unconsumed_tail)
     except (OSError, zlib.error):
-        return cuerpo
-    return cuerpo
+        return cuerpo[:max_bytes], len(cuerpo) > max_bytes
+    return cuerpo[:max_bytes], len(cuerpo) > max_bytes
+
+
+def _descomprimir(cuerpo: bytes, codificacion: str) -> bytes:
+    """Compatibilidad para consumidores internos; aplica igualmente un límite de salida."""
+    return _descomprimir_limitado(cuerpo, codificacion, MAX_BYTES_POR_DEFECTO)[0]
 
 
 def _resultado_vacio(url: str, **extra: Any) -> dict[str, Any]:
@@ -96,12 +146,20 @@ def _resultado_vacio(url: str, **extra: Any) -> dict[str, Any]:
     return base
 
 
-def _descargar_local(url: str) -> dict[str, Any]:
+def _descargar_local(url: str, max_bytes: int = MAX_BYTES_POR_DEFECTO) -> dict[str, Any]:
     parsed = urlparse(url)
-    ruta = Path(url2pathname(parsed.path))
+    if parsed.netloc not in ("", "localhost"):
+        return _resultado_vacio(url, error="host file:// no permitido")
+    ruta = Path(url2pathname(parsed.path)).resolve()
+    raiz_fixturas = (RAIZ_PROYECTO / "tests" / "fixturas").resolve()
+    if not ruta.is_relative_to(raiz_fixturas):
+        return _resultado_vacio(url, error="file:// limitado a tests/fixturas")
     if not ruta.exists():
         return _resultado_vacio(url, status=404, error=f"archivo no encontrado: {ruta}")
-    cuerpo = ruta.read_bytes()
+    with ruta.open("rb") as f:
+        cuerpo = f.read(max_bytes + 1)
+    truncado = len(cuerpo) > max_bytes
+    cuerpo = cuerpo[:max_bytes]
     charset = _detectar_charset({}, cuerpo)
     return _resultado_vacio(
         url,
@@ -110,6 +168,7 @@ def _descargar_local(url: str) -> dict[str, Any]:
         cabeceras={"Content-Type": "text/html"},
         charset=charset,
         bytes=len(cuerpo),
+        error="respuesta truncada por tamaño" if truncado else None,
     )
 
 
@@ -141,9 +200,18 @@ def descargar(
     Soporta ``file://`` para fixturas locales. Codifica caracteres no ASCII de la ruta y
     reintenta una vez ante errores de red o tiempo de espera (no ante códigos HTTP).
     """
-    if url.startswith("file://"):
-        return _descargar_local(url)
-    url = a_uri(url)
+    if not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_BYTES_ABSOLUTO:
+        return _resultado_vacio(url, error=f"max_bytes debe estar entre 1 y {MAX_BYTES_ABSOLUTO}")
+    if not isinstance(timeout, (int, float)) or timeout <= 0 or not isinstance(reintentos, int) or not 0 <= reintentos <= 2:
+        return _resultado_vacio(url, error="timeout debe ser positivo y reintentos debe estar entre 0 y 2")
+    if url.lower().startswith("file://"):
+        return _descargar_local(url, max_bytes=max_bytes)
+    try:
+        url = a_uri(url)
+        if urlparse(url).scheme.lower() not in ("http", "https"):
+            return _resultado_vacio(url, error="solo se permiten URLs HTTP o HTTPS")
+    except (ValueError, UnicodeError) as e:
+        return _resultado_vacio(url, error=f"URL malformada: {e}")
     resultado = _descargar_una_vez(url, ua=ua, timeout=timeout, max_bytes=max_bytes, metodo=metodo, cabeceras_extra=cabeceras_extra)
     intento = 0
     while resultado.get("status") == 0 and intento < reintentos:
@@ -165,6 +233,8 @@ def _descargar_una_vez(
     cabeceras_extra: dict[str, str] | None,
 ) -> dict[str, Any]:
 
+    if not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_BYTES_ABSOLUTO:
+        return _resultado_vacio(url, error=f"max_bytes debe estar entre 1 y {MAX_BYTES_ABSOLUTO}")
     cabeceras = {
         "User-Agent": ua or UA_POR_DEFECTO,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -175,15 +245,15 @@ def _descargar_una_vez(
         cabeceras.update(cabeceras_extra)
     req = Request(url, headers=cabeceras, method=metodo)
     registro = _RegistroRedirecciones()
-    opener = build_opener(registro)
+    opener = build_opener(ProxyHandler({}), _HTTPFijado(), _HTTPSFijado(), registro)
     inicio = time.time()
     try:
         with opener.open(req, timeout=timeout) as resp:
             cuerpo = resp.read(max_bytes + 1)
             truncado = len(cuerpo) > max_bytes
-            cuerpo = cuerpo[:max_bytes]
+            cuerpo, truncado_por_expansion = _descomprimir_limitado(cuerpo[:max_bytes], _cabecera({k: v for k, v in resp.headers.items()}, "Content-Encoding"), max_bytes)
+            truncado = truncado or truncado_por_expansion
             cabeceras_resp = {k: v for k, v in resp.headers.items()}
-            cuerpo = _descomprimir(cuerpo, _cabecera(cabeceras_resp, "Content-Encoding"))
             charset = _detectar_charset(cabeceras_resp, cuerpo)
             return {
                 "url": url,
@@ -200,11 +270,12 @@ def _descargar_una_vez(
     except HTTPError as e:
         cuerpo = b""
         try:
-            cuerpo = e.read(max_bytes)
+            cuerpo = e.read(max_bytes + 1)
         except Exception:  # noqa: BLE001
             pass
         cabeceras_resp = {k: v for k, v in (e.headers or {}).items()}
-        cuerpo = _descomprimir(cuerpo, _cabecera(cabeceras_resp, "Content-Encoding"))
+        truncado = len(cuerpo) > max_bytes
+        cuerpo, truncado_por_expansion = _descomprimir_limitado(cuerpo[:max_bytes], _cabecera(cabeceras_resp, "Content-Encoding"), max_bytes)
         charset = _detectar_charset(cabeceras_resp, cuerpo)
         return {
             "url": url,
@@ -216,7 +287,7 @@ def _descargar_una_vez(
             "charset": charset,
             "bytes": len(cuerpo),
             "tiempo_ms": int((time.time() - inicio) * 1000),
-            "error": f"HTTP {e.code}",
+            "error": f"HTTP {e.code}" + ("; respuesta truncada por tamaño" if truncado or truncado_por_expansion else ""),
         }
     except (URLError, TimeoutError, ValueError, OSError) as e:
         return _resultado_vacio(

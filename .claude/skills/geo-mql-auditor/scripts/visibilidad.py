@@ -53,6 +53,14 @@ def _fecha(args) -> date:
     return date.fromisoformat(args.fecha) if getattr(args, "fecha", None) else date.today()
 
 
+def _marcar_incompleta_forzada(filas: list[dict[str, Any]], *, completa: bool, forzar: bool) -> None:
+    if completa or not forzar:
+        return
+    for fila in filas:
+        nota = (fila.get("notas") or "").strip()
+        fila["notas"] = (nota + " | " if nota else "") + visibilidad.MARCA_CAPTURA_INCOMPLETA
+
+
 def cmd_prompts(args) -> int:
     ctx = _ctx(args)
     r = _rutas(args)
@@ -123,7 +131,12 @@ def cmd_correr(args) -> int:
     reps = args.repeticiones or cfg["repeticiones"]
     costo = motores.costo_estimado(n_prompts=len(prompts), motores=con_llave, repeticiones=reps)
     print(f"Motores con llave: {', '.join(con_llave) or 'ninguno'}" + (f" · sin llave: {', '.join(sin_llave)}" if sin_llave else ""))
-    print(f"Costo estimado: {costo['respuestas']} respuestas, {costo['busquedas']} búsquedas, USD {costo['usd_busquedas_maximo']} máximo por búsquedas (tokens aparte).")
+    print(f"Estimación: {costo['respuestas']} respuestas, {costo['busquedas']} búsquedas; subtotal estimable (tarifa y usos conocidos) USD {costo['usd_busquedas_conocido']}.")
+    if costo["usd_busquedas_maximo"] is None:
+        faltan_costos = ", ".join(sorted(set(costo["tarifas_desconocidas"] + costo["usos_maximos_desconocidos"])))
+        print(f"Costo máximo total no disponible (tarifa desconocida o máximo de búsquedas no fijado en la petición para: {faltan_costos}); tokens aparte.")
+    else:
+        print(f"Costo máximo de búsquedas USD {costo['usd_busquedas_maximo']} (tokens aparte).")
     if args.solo_costo or not con_llave:
         return 0 if con_llave else 1
     res = visibilidad.correr_api(prompts, cfg, motores_activos=con_llave, repeticiones=reps, llaves=llaves, dir_datos=r["dir"], corrida=args.corrida, fecha=_fecha(args))
@@ -149,12 +162,19 @@ def cmd_importar_captura(args) -> int:
         print(f"Pregunta distinta al panel en {x['motor']}/{x['prompt_id']}: archivo «{x['pregunta_archivo']}» · panel «{x['pregunta_panel']}» (no se sustituye)")
     for x in v["sin_respuesta"]:
         print(f"SIN_RESPUESTA en {x['motor']}/{x['prompt_id']}: {x['nota'] or '(sin nota)'}")
+    for campo in ("motores_invalidos", "urls_invalidas", "filas_duplicadas", "respuestas_vacias"):
+        if v.get(campo):
+            print(f"{campo}: {v[campo]}")
     if v["prompt_ids_desconocidos"] and not args.forzar:
         print("No se escribe el CSV: hay prompt_id desconocidos. Usa --forzar para escribirlo de todos modos.", file=sys.stderr)
+        return 2
+    if not res["completa"] and not args.forzar:
+        print("No se escribe el CSV: la captura está incompleta o contiene datos inválidos. Usa --forzar para aceptar explícitamente el conjunto parcial.", file=sys.stderr)
         return 2
     if destino.exists() and any((f.get("respuesta") or "").strip() for f in visibilidad._leer_csv(destino)) and not args.forzar:
         print(f"{destino} ya tiene respuestas; usa --forzar para sobrescribirlo.", file=sys.stderr)
         return 2
+    _marcar_incompleta_forzada(res["filas"], completa=res["completa"], forzar=args.forzar)
     visibilidad.escribir_respuestas(destino, res["filas"])
     print(f"Escrito: {destino} ({len(res['filas'])} filas; corrida {args.corrida}, modo manual, repetición 1, modelo '{visibilidad.MODELO_MANUAL}')")
     print("Validación: " + ("completa" if res["completa"] else "con observaciones (ver arriba)"))
@@ -178,12 +198,19 @@ def cmd_importar_txt(args) -> int:
     for x in v["preguntas_no_coinciden"]:
         print(f"Pregunta distinta al panel en {x['prompt_id']}: archivo «{x['pregunta_archivo']}» · panel «{x['pregunta_panel']}» (no se sustituye)")
     print(f"SIN_AIO: {len(v['sin_aio'])} ({', '.join(v['sin_aio']) or 'ninguno'}) · SIN_RESPUESTA: {len(v['sin_respuesta'])}")
+    for campo in ("urls_invalidas", "filas_duplicadas", "respuestas_vacias"):
+        if v.get(campo):
+            print(f"{campo}: {v[campo]}")
     if v["prompt_ids_desconocidos"] and not args.forzar:
         print("No se escribe el CSV: hay prompt_id desconocidos. Usa --forzar.", file=sys.stderr)
+        return 2
+    if not res["completa"] and not args.forzar:
+        print("No se escribe el CSV: la captura está incompleta o contiene datos inválidos. Usa --forzar para aceptar explícitamente el conjunto parcial.", file=sys.stderr)
         return 2
     if destino.exists() and not args.forzar:
         print(f"{destino} ya existe; usa --forzar para sobrescribirlo.", file=sys.stderr)
         return 2
+    _marcar_incompleta_forzada(res["filas"], completa=res["completa"], forzar=args.forzar)
     visibilidad.escribir_respuestas(destino, res["filas"])
     print(f"Escrito: {destino} ({len(res['filas'])} filas)")
     return 0

@@ -200,14 +200,14 @@ def v_x03(ev: EvidenciaPagina) -> ResultadoRegla:
     evd = [_ev("extractabilidad.tablas_listas", {k: v for k, v in t.items() if k != "oraciones"}, _o(t.get("oraciones", []), ev))]
     if not t["menciona_comparacion"] and not t["menciona_pasos"]:
         return _r(ev, "X-03", "no_aplica", "la página no compara ni describe pasos", evidencia=evd)
-    if t["veredicto"]:
-        return _r(ev, "X-03", "pasa", f"{t['tablas_con_encabezado']} tabla(s) con encabezado y {t['listas_ordenadas']} lista(s) ordenada(s)", evidencia=evd)
     faltan = []
-    if t["menciona_comparacion"] and not t["tablas_con_encabezado"] and not t["listas"]:
-        faltan.append("comparación sin tabla ni lista")
+    if t["menciona_comparacion"] and not t["tablas_con_encabezado"]:
+        faltan.append("comparación sin tabla con encabezados")
     if t["menciona_pasos"] and not t["listas_ordenadas"]:
         faltan.append("pasos sin lista ordenada")
-    return _r(ev, "X-03", "falla", "; ".join(faltan) or "estructura insuficiente", evidencia=evd)
+    if faltan:
+        return _r(ev, "X-03", "falla", "; ".join(faltan), evidencia=evd)
+    return _r(ev, "X-03", "pasa", f"{t['tablas_con_encabezado']} tabla(s) con encabezado y {t['listas_ordenadas']} lista(s) ordenada(s)", evidencia=evd)
 
 
 def v_x04(ev: EvidenciaPagina) -> ResultadoRegla:
@@ -258,6 +258,8 @@ def v_x09(ev: EvidenciaPagina) -> ResultadoRegla:
     evd = [_ev("frescura", {"fecha_principal": f["fecha_principal"], "antiguedad_dias": f["antiguedad_dias"], "fuente": f["fuente"]}, _o([{"posicion": f["fuente"] or "fecha", "texto": str(f.get("fecha_cruda") or f["fecha_principal"])}] if f["fecha_principal"] else [], ev))]
     if f["antiguedad_dias"] is None:
         return _r(ev, "X-09", "sin_evidencia", "sin fecha de modificación detectable", obs="Hipótesis", evidencia=evd)
+    if f["antiguedad_dias"] < 0:
+        return _r(ev, "X-09", "falla", f"fecha de modificación {abs(f['antiguedad_dias'])} días en el futuro", evidencia=evd)
     if f["antiguedad_dias"] > 90:
         return _r(ev, "X-09", "falla", f"última actualización hace {f['antiguedad_dias']} días ({f['fuente']})", evidencia=evd)
     return _r(ev, "X-09", "pasa", f"actualizado hace {f['antiguedad_dias']} días", evidencia=evd)
@@ -392,7 +394,7 @@ def v_s07(ev: EvidenciaPagina) -> ResultadoRegla:
     s = ev.schema["service"]
     evd = [_ev("schema.service", s)]
     if not s["presente"]:
-        return _r(ev, "S-07", "falla", "sin Service (opcional, sin efecto demostrado)", evidencia=evd)
+        return _r(ev, "S-07", "no_aplica", "sin Service (opcional según el rulebook)", evidencia=evd)
     if s["faltantes"]:
         return _r(ev, "S-07", "falla", "Service sin: " + ", ".join(s["faltantes"]), evidencia=evd)
     return _r(ev, "S-07", "pasa", "Service completo", evidencia=evd)
@@ -405,6 +407,8 @@ def v_s08(ev: EvidenciaPagina) -> ResultadoRegla:
         return _r(ev, "S-08", "no_aplica", "sin FAQPage (no es prioritario)", evidencia=evd)
     if f["no_visibles"]:
         return _r(ev, "S-08", "falla", f"{len(f['no_visibles'])} pregunta(s) del markup no aparecen en la página", evidencia=evd)
+    if not f["preguntas"]:
+        return _r(ev, "S-08", "falla", "FAQPage sin preguntas en mainEntity", evidencia=evd)
     return _r(ev, "S-08", "pasa", f"FAQPage con {f['preguntas']} preguntas visibles", evidencia=evd)
 
 
@@ -494,12 +498,12 @@ def v_e03(ev: EvidenciaPagina) -> ResultadoRegla:
     evd = [_ev("entidad.sameas.resueltos", s["resueltos"])]
     if s["total"] == 0:
         return _r(ev, "E-03", "no_aplica", "sin sameAs", evidencia=evd)
-    if any(r["resuelve"] is None for r in s["resueltos"]):
+    if s.get("truncado") or any(r["resuelve"] is None for r in s["resueltos"]):
         return _r(ev, "E-03", "sin_evidencia", "sameAs no verificados (corre con --resolver-sameas)", obs="Hipótesis", evidencia=evd)
-    rotos = [r["url"] for r in s["resueltos"] if not r["resuelve"]]
+    rotos = [r["url"] for r in s["resueltos"] if r.get("status") != 200]
     if rotos:
-        return _r(ev, "E-03", "falla", "no resuelven: " + ", ".join(rotos), evidencia=evd)
-    return _r(ev, "E-03", "pasa", "todos los sameAs resuelven", evidencia=evd)
+        return _r(ev, "E-03", "falla", "no terminan en HTTP 200: " + ", ".join(rotos), evidencia=evd)
+    return _r(ev, "E-03", "sin_evidencia", "las URL terminan en HTTP 200, pero la identidad semántica de cada perfil requiere revisión humana", obs="Hipótesis", evidencia=evd)
 
 
 def v_e04(ev: EvidenciaPagina) -> ResultadoRegla:
@@ -509,9 +513,11 @@ def v_e04(ev: EvidenciaPagina) -> ResultadoRegla:
         return _r(ev, "E-04", "falla", "sin autor visible ni en el markup", evidencia=evd)
     if not a["visible"]:
         return _r(ev, "E-04", "falla", f"el autor {a['nombre']} está en el markup pero no visible", evidencia=evd)
-    if not a["con_credenciales"]:
-        return _r(ev, "E-04", "falla", f"autor {a['nombre']} sin cargo ni perfil enlazado", evidencia=evd)
-    return _r(ev, "E-04", "pasa", f"{a['nombre']} ({a['cargo'] or 'perfil enlazado'})", evidencia=evd)
+    if not a.get("con_cargo"):
+        return _r(ev, "E-04", "falla", f"autor {a['nombre']} sin cargo o credenciales visibles", evidencia=evd)
+    if not a.get("con_perfil"):
+        return _r(ev, "E-04", "falla", f"autor {a['nombre']} sin enlace a perfil", evidencia=evd)
+    return _r(ev, "E-04", "pasa", f"{a['nombre']} con cargo/credenciales y perfil enlazado", evidencia=evd)
 
 
 def v_e06(ev: EvidenciaPagina) -> ResultadoRegla:
@@ -520,24 +526,27 @@ def v_e06(ev: EvidenciaPagina) -> ResultadoRegla:
     if not ev.schema["localbusiness"]["presente"]:
         return _r(ev, "E-06", "sin_evidencia", "sin LocalBusiness contra el cual comparar", obs="Hipótesis", evidencia=evd)
     problemas = []
+    if n.get("nombre_coincide") is False:
+        problemas.append("nombre del LocalBusiness no aparece en el contenido visible")
     if n["telefono_coincide"] is False:
         problemas.append("teléfono del markup no aparece en la página")
     if n["direccion_coincide"] is False:
         problemas.append("dirección del markup no coincide con la visible")
     if problemas:
         return _r(ev, "E-06", "falla", "; ".join(problemas), evidencia=evd)
-    if n["telefono_coincide"] is None and n["direccion_coincide"] is None:
-        return _r(ev, "E-06", "sin_evidencia", "LocalBusiness sin teléfono ni dirección comparables", obs="Hipótesis", evidencia=evd)
-    return _r(ev, "E-06", "pasa", "teléfono y dirección coinciden", evidencia=evd)
+    if n.get("nombre_coincide") is None or n["telefono_coincide"] is None or n["direccion_coincide"] is None:
+        return _r(ev, "E-06", "sin_evidencia", "falta evidencia visible para comparar uno o más componentes del NAP", obs="Hipótesis", evidencia=evd)
+    return _r(ev, "E-06", "pasa", "nombre, teléfono y dirección comparables coinciden", evidencia=evd)
 
 
 # ================================================================== SITIO
 def v_t02(s: EvidenciaSitio) -> ResultadoRegla:
     r = s.robots
     evd = [_ev("robots", {"status": r.get("status"), "estado": r.get("estado"), "url": r.get("url")})]
-    if r.get("estado") in ("ok", "no_existe"):
+    status = r.get("status")
+    if (r.get("estado") == "ok" and status == 200) or (r.get("estado") == "no_existe" and isinstance(status, int) and 400 <= status < 500):
         return _r(s, "T-02", "pasa", f"robots.txt responde {r.get('status')}", evidencia=evd)
-    if r.get("estado") == "error_servidor":
+    if isinstance(status, int) and status >= 500:
         return _r(s, "T-02", "falla", f"robots.txt responde {r.get('status')}: los crawlers conformes asumen bloqueo total", evidencia=evd)
     return _r(s, "T-02", "sin_evidencia", f"no se pudo obtener robots.txt: {r.get('error')}", obs="Hipótesis", evidencia=evd)
 
@@ -550,6 +559,8 @@ def v_t03(s: EvidenciaSitio, regla_id: str = "T-03") -> ResultadoRegla:
         return _r(s, regla_id, "falla", "robots.txt con error de servidor bloquea a todos los bots conformes", evidencia=evd)
     if s.robots.get("estado") == "inaccesible":
         return _r(s, regla_id, "sin_evidencia", "robots.txt inaccesible", obs="Hipótesis", evidencia=evd)
+    if not b.get("busqueda_total") or b.get("busqueda_sin_evidencia"):
+        return _r(s, regla_id, "sin_evidencia", "no hay evidencia completa sobre acceso de bots de búsqueda", obs="Hipótesis", evidencia=evd)
     if bloq:
         return _r(s, regla_id, "falla", "bots de búsqueda bloqueados: " + ", ".join(bloq), evidencia=evd)
     return _r(s, regla_id, "pasa", f"{b.get('busqueda_total', 0)} bots de búsqueda con acceso", evidencia=evd)
@@ -558,6 +569,8 @@ def v_t03(s: EvidenciaSitio, regla_id: str = "T-03") -> ResultadoRegla:
 def v_t04(s: EvidenciaSitio) -> ResultadoRegla:
     b = s.bots.get("resumen", {})
     evd = [_ev("bots.entrenamiento", {"politica": b.get("politica_entrenamiento"), "bloqueados": b.get("entrenamiento_bloqueados")})]
+    if s.robots.get("estado") not in ("ok", "no_existe") or not b.get("entrenamiento_total") or b.get("entrenamiento_sin_evidencia"):
+        return _r(s, "T-04", "sin_evidencia", "no hay evidencia suficiente de una política de entrenamiento", obs="Hipótesis", evidencia=evd)
     pol = b.get("politica_entrenamiento")
     if pol == "mixta":
         return _r(s, "T-04", "falla", "política inconsistente: bloquea " + ", ".join(b.get("entrenamiento_bloqueados", [])) + " pero permite otros bots de entrenamiento; decide una política única", evidencia=evd)
@@ -568,6 +581,8 @@ def v_t05(s: EvidenciaSitio) -> ResultadoRegla:
     b = s.bots.get("resumen", {})
     bloq = b.get("usuario_bloqueados", [])
     evd = [_ev("bots.usuario", {"bloqueados": bloq})]
+    if s.robots.get("estado") not in ("ok", "no_existe") or not b.get("usuario_total") or b.get("usuario_sin_evidencia"):
+        return _r(s, "T-05", "sin_evidencia", "no hay evidencia suficiente sobre acceso de fetchers por usuario", obs="Hipótesis", evidencia=evd)
     if bloq:
         return _r(s, "T-05", "falla", "fetchers por usuario bloqueados en robots.txt (varios lo ignoran, pero Claude-User lo respeta): " + ", ".join(bloq), evidencia=evd)
     return _r(s, "T-05", "pasa", "fetchers por usuario permitidos", evidencia=evd)
@@ -586,9 +601,15 @@ def v_t11(s: EvidenciaSitio) -> ResultadoRegla:
     declarado = m.get("declarado_en_robots")
     if declarado is None:
         declarado = bool(s.robots.get("sitemaps"))
-    evd = [_ev("sitemap", {k: m.get(k) for k in ("url", "urls_total", "con_lastmod", "sin_lastmod", "lastmod_futuras", "errores")} | {"declarado_en_robots": declarado})]
+    evd = [_ev("sitemap", {k: m.get(k) for k in ("url", "urls_total", "con_lastmod", "sin_lastmod", "lastmod_futuras", "errores", "bytes_max", "exceso_bytes", "exceso_urls", "entrada_truncada", "limite_bytes", "cobertura_completa")} | {"declarado_en_robots": declarado})]
+    if m.get("exceso_bytes") or m.get("exceso_urls"):
+        return _r(s, "T-11", "falla", "sitemap excede el límite estándar de 50 MB o 50.000 URL por archivo", evidencia=evd)
+    if m.get("limite_bytes") or m.get("entrada_truncada"):
+        return _r(s, "T-11", "sin_evidencia", "el sitemap excede el presupuesto local de lectura; no se puede verificar el límite estándar", obs="Hipótesis", evidencia=evd)
     if not m.get("presente"):
         return _r(s, "T-11", "falla", "sin sitemap XML accesible (" + "; ".join(m.get("errores", [])[:2]) + ")", evidencia=evd)
+    if m.get("cobertura_completa") is False:
+        return _r(s, "T-11", "sin_evidencia", "recolección parcial del sitemap: " + "; ".join(m.get("errores", [])[:2]), obs="Hipótesis", evidencia=evd)
     problemas = []
     if m.get("sin_lastmod"):
         problemas.append(f"{m['sin_lastmod']} de {m['urls_total']} URL sin lastmod")
@@ -604,12 +625,14 @@ def v_t15(s: EvidenciaSitio) -> ResultadoRegla:
     m = s.sitemap
     evd = [_ev("sitemap.lastmod", {"dias_desde_lastmod": m.get("dias_desde_lastmod")})]
     if not m.get("presente"):
-        return _r(s, "T-15", "falla", "sin sitemap; IndexNow no verificable desde fuera", obs="Probable", evidencia=evd)
+        return _r(s, "T-15", "sin_evidencia", "sin sitemap; IndexNow no es verificable desde fuera", obs="Hipótesis", evidencia=evd)
     d = m.get("dias_desde_lastmod")
     if d is None:
-        return _r(s, "T-15", "falla", "sitemap sin lastmod; IndexNow no verificable desde fuera", obs="Probable", evidencia=evd)
+        return _r(s, "T-15", "sin_evidencia", "sitemap sin lastmod y no hay evidencia observable de IndexNow", obs="Hipótesis", evidencia=evd)
+    if d < 0:
+        return _r(s, "T-15", "sin_evidencia", "lastmod futuro; no se puede inferir actualización ni IndexNow", obs="Hipótesis", evidencia=evd)
     if d > 90:
-        return _r(s, "T-15", "falla", f"último lastmod hace {d} días; IndexNow no verificable desde fuera", obs="Probable", evidencia=evd)
+        return _r(s, "T-15", "sin_evidencia", f"último lastmod hace {d} días; IndexNow no verificable desde fuera", obs="Hipótesis", evidencia=evd)
     return _r(s, "T-15", "pasa", f"lastmod reciente ({d} días); IndexNow no verificable desde fuera", obs="Probable", evidencia=evd)
 
 

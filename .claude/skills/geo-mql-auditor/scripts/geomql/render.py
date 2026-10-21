@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from .html import Documento, contar_palabras
+from .seguridad_red import destinos_publicos
 
 
 def disponible() -> bool:
@@ -30,16 +32,34 @@ def renderizar(url: str, *, timeout_ms: int = 30000, espera_ms: int = 6000, loca
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as p:
-            navegador = p.chromium.launch(headless=True)
-            pagina = navegador.new_page(user_agent=UA_RENDER, locale=locale)
-            pagina.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            pagina.wait_for_timeout(espera_ms)
-            html = pagina.content()
+            navegador = p.chromium.launch(headless=True, args=["--disable-background-networking", "--disable-sync"])
+            contexto = navegador.new_context(user_agent=UA_RENDER, locale=locale, service_workers="block")
+
+            def _filtrar_red(route):
+                esquema = urlsplit(route.request.url).scheme.lower()
+                if esquema in ("data", "blob", "about"):
+                    route.continue_()
+                    return
+                try:
+                    destinos_publicos(route.request.url)
+                except ValueError:
+                    route.abort("blockedbyclient")
+                    return
+                route.continue_()
+
+            contexto.route("**/*", _filtrar_red)
             try:
-                visibles = len(pagina.inner_text("body").split())
-            except Exception:  # noqa: BLE001
-                visibles = 0
-            navegador.close()
+                pagina = contexto.new_page()
+                pagina.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                pagina.wait_for_timeout(espera_ms)
+                html = pagina.content()
+                try:
+                    visibles = len(pagina.inner_text("body").split())
+                except Exception:  # noqa: BLE001
+                    visibles = 0
+            finally:
+                contexto.close()
+                navegador.close()
         doc = Documento(html, url)
         return {"disponible": True, "html": html, "palabras_principal": contar_palabras(doc.texto_principal()), "palabras_visibles": visibles, "error": None}
     except Exception as e:  # noqa: BLE001

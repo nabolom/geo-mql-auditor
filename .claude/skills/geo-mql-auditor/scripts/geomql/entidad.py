@@ -113,7 +113,8 @@ def autoria(doc: Documento, schema_res: dict[str, Any] | None) -> dict[str, Any]
         c = _CARGO_RE.search(tras)
         if c:
             cargo = tras[c.start():].split("·")[0].split("\n")[0].strip()[:80]
-    con_credenciales = bool(cargo) or (bool(nombre) and nombre in (person.get("con_url_o_sameas") or []))
+    con_perfil = bool(url_perfil) or (bool(nombre) and nombre in (person.get("con_url_o_sameas") or []))
+    con_credenciales = bool(cargo) or con_perfil
     return {
         "presente": bool(nombre),
         "nombre": nombre,
@@ -122,6 +123,8 @@ def autoria(doc: Documento, schema_res: dict[str, Any] | None) -> dict[str, Any]
         "url_perfil": url_perfil,
         "person_con_url_o_sameas": bool(nombre) and nombre in (person.get("con_url_o_sameas") or []),
         "con_credenciales": con_credenciales,
+        "con_cargo": bool(cargo),
+        "con_perfil": con_perfil,
         "visible": bool(nombre) and _norm(nombre) in _norm(doc.texto(excluir_boilerplate=False)),
     }
 
@@ -143,6 +146,7 @@ def nap(doc: Documento, schema_res: dict[str, Any] | None) -> dict[str, Any]:
     tels = sorted({_digitos(t)[-10:] for t in _TEL_RE.findall(texto) if len(_digitos(t)) >= 10})
     dirs = sorted({d.strip() for d in _DIR_RE.findall(texto)})[:5]
     lb = (schema_res or {}).get("localbusiness", {}) if schema_res else {}
+    nombre_schema = lb.get("name")
     tel_schema = _digitos(lb.get("telephone"))[-10:] if lb.get("telephone") else None
     addr = lb.get("address")
     calle_schema = addr.get("streetAddress") if isinstance(addr, dict) else (addr if isinstance(addr, str) else None)
@@ -151,28 +155,40 @@ def nap(doc: Documento, schema_res: dict[str, Any] | None) -> dict[str, Any]:
         "direcciones_visibles": dirs,
         "telefono_schema": tel_schema,
         "direccion_schema": calle_schema,
+        "nombre_schema": nombre_schema,
+        "nombre_coincide": (_norm(nombre_schema) in _norm(texto) if nombre_schema else None),
         "telefono_coincide": (tel_schema in tels) if tel_schema else None,
         "direccion_coincide": (any(_norm(calle_schema) in _norm(d) or _norm(d) in _norm(calle_schema) for d in dirs) if calle_schema and dirs else None),
     }
 
 
-def resolver_sameas(urls: list[str], resolver: Callable[[str], dict[str, Any]] | None) -> list[dict[str, Any]]:
-    if resolver is None:
-        return [{"url": u, "status": None, "resuelve": None} for u in urls]
+MAX_SAMEAS_A_RESOLVER = 20
+
+
+def resolver_sameas(urls: list[str], resolver: Callable[[str], dict[str, Any]] | None) -> dict[str, Any]:
     out = []
-    for u in urls[:10]:
-        r = resolver(u)
-        out.append({"url": u, "status": r.get("status"), "resuelve": r.get("status") in (200, 301, 302, 303, 307, 308) or (200 <= (r.get("status") or 0) < 400)})
-    return out
+    for u in urls[:MAX_SAMEAS_A_RESOLVER]:
+        if resolver is None:
+            out.append({"url": u, "status": None, "url_final": None, "resuelve": None})
+            continue
+        try:
+            r = resolver(u)
+        except Exception as e:  # noqa: BLE001
+            out.append({"url": u, "status": None, "url_final": None, "resuelve": None, "error": f"{type(e).__name__}: {e}"})
+            continue
+        status = r.get("status") if isinstance(r, dict) else None
+        out.append({"url": u, "status": status, "url_final": r.get("url_final") if isinstance(r, dict) else None, "resuelve": status == 200})
+    return {"items": out, "total": len(urls), "truncado": len(urls) > MAX_SAMEAS_A_RESOLVER}
 
 
 def analizar(doc: Documento, schema_res: dict[str, Any] | None = None, *, resolver: Callable[[str], dict[str, Any]] | None = None, tipo_pagina: str = "otra") -> dict[str, Any]:
     same = (schema_res or {}).get("organization", {}).get("sameAs", []) if schema_res else []
     same = [s for s in same if isinstance(s, str)]
+    resultado_sameas = resolver_sameas(same, resolver)
     return {
         "nombre": nombres_de_marca(doc, schema_res, tipo_pagina=tipo_pagina),
         "autoria": autoria(doc, schema_res),
         "acerca_contacto": acerca_y_contacto(doc),
         "nap": nap(doc, schema_res),
-        "sameas": {"urls": same, "total": len(same), "resueltos": resolver_sameas(same, resolver)},
+        "sameas": {"urls": same, "total": len(same), "resueltos": resultado_sameas["items"], "truncado": resultado_sameas["truncado"]},
     }

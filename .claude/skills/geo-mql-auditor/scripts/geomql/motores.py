@@ -13,12 +13,16 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
+
+from . import fetch
 
 LLAVES = {"chatgpt": "OPENAI_API_KEY", "claude": "ANTHROPIC_API_KEY", "perplexity": "PERPLEXITY_API_KEY", "gemini": "GEMINI_API_KEY"}
 MOTORES_API = tuple(LLAVES)
 
 # Tarifas declaradas por cada proveedor el 2026-09-10 (USD por búsqueda web, además de tokens).
-TARIFAS_BUSQUEDA_USD = {"chatgpt": 10 / 1000, "claude": 10 / 1000, "perplexity": None, "gemini": 0.0}
+TARIFAS_BUSQUEDA_USD = {"chatgpt": 10 / 1000, "claude": 10 / 1000, "perplexity": None, "gemini": None}
+BUSQUEDAS_MAXIMAS_POR_RESPUESTA = {"chatgpt": None, "claude": 5, "perplexity": None, "gemini": None}
 NOTAS_TARIFA = {
     "chatgpt": "OpenAI cobra USD 10 por cada 1,000 búsquedas web más tokens.",
     "claude": "Anthropic cobra USD 10 por cada 1,000 búsquedas web más tokens.",
@@ -107,12 +111,23 @@ def construir_peticion(motor: str, prompt: str, cfg: dict[str, Any], llave: str 
 
 
 def enviar(peticion: dict[str, Any], *, timeout: int = 90) -> dict[str, Any]:
-    """POST JSON y devuelve el JSON de respuesta. Los errores HTTP se devuelven como {'error': ...}."""
+    """POST JSON con límite de respuesta y sin seguir redirecciones con credenciales."""
     datos = json.dumps(peticion["cuerpo"]).encode("utf-8")
     req = urllib.request.Request(peticion["url"], data=datos, headers=peticion["cabeceras"], method="POST")
+    class _NoRedirecciones(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        with urllib.request.build_opener(_NoRedirecciones()).open(req, timeout=timeout) as resp:
+            cuerpo = resp.read(2_000_001)
+            if len(cuerpo) > 2_000_000:
+                return {"error": "respuesta API excede el límite de 2 MB"}
+            try:
+                datos_resp = json.loads(cuerpo.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                return {"error": f"respuesta API no es JSON válido: {e}"}
+            return datos_resp if isinstance(datos_resp, dict) else {"error": "respuesta API JSON debe ser un objeto"}
     except urllib.error.HTTPError as e:
         cuerpo = e.read().decode("utf-8", "replace")[:500]
         return {"error": f"HTTP {e.code}: {cuerpo}"}
@@ -121,13 +136,12 @@ def enviar(peticion: dict[str, Any], *, timeout: int = 90) -> dict[str, Any]:
 
 
 def resolver_redireccion(url: str, *, timeout: int = 15) -> str:
-    """Sigue la redirección de una URL (para las citas de Gemini vía vertexaisearch) y devuelve la URL final."""
-    try:
-        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "geo-mql-auditor"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.geturl()
-    except Exception:  # noqa: BLE001
+    """Resuelve únicamente enlaces del dominio oficial; usa el transporte SSRF-safe."""
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    if host != "vertexaisearch.cloud.google.com" and not host.endswith(".vertexaisearch.cloud.google.com"):
         return url
+    r = fetch.resolver(url, timeout=timeout)
+    return r["url_final"] if 200 <= (r.get("status") or 0) < 400 else url
 
 
 def _unicas(urls: list[str]) -> list[str]:
@@ -189,7 +203,7 @@ def extraer_respuesta(motor: str, datos: dict[str, Any], *, resolver: Callable[[
             web = ch.get("web") or {}
             uri = web.get("uri", "")
             if uri:
-                final = resolver(uri) if resolver and "vertexaisearch" in uri else uri
+                final = resolver(uri) if resolver and (urlparse(uri).hostname or "").lower().endswith("vertexaisearch.cloud.google.com") else uri
                 citadas.append(final)
                 if web.get("title"):
                     titulos[final] = web["title"]
@@ -197,22 +211,43 @@ def extraer_respuesta(motor: str, datos: dict[str, Any], *, resolver: Callable[[
     return {"texto": "\n".join(t for t in texto_partes if t).strip(), "urls_citadas": _unicas(citadas), "fuentes_consultadas": _unicas(fuentes), "titulos": titulos}
 
 
-def costo_estimado(*, n_prompts: int, motores: list[str], repeticiones: int, busquedas_por_respuesta: int = 1) -> dict[str, Any]:
-    """Costo máximo declarado por búsquedas web de una corrida; los tokens se cobran aparte y no se estiman."""
+def costo_estimado(*, n_prompts: int, motores: list[str], repeticiones: int, busquedas_por_respuesta: int | None = None) -> dict[str, Any]:
+    """Costo de búsqueda con usos máximos por proveedor; si una tarifa es desconocida, no reporta un máximo monetario."""
+    if not isinstance(n_prompts, int) or n_prompts < 0 or not isinstance(repeticiones, int) or repeticiones < 1:
+        raise ValueError("n_prompts debe ser no negativo y repeticiones debe ser entero positivo")
+    if busquedas_por_respuesta is not None and (not isinstance(busquedas_por_respuesta, int) or busquedas_por_respuesta < 0):
+        raise ValueError("busquedas_por_respuesta debe ser un entero no negativo")
+    desconocidos = [m for m in motores if m not in MOTORES_API]
+    if desconocidos:
+        raise ValueError("motores desconocidos para estimación: " + ", ".join(desconocidos))
     respuestas = n_prompts * len(motores) * repeticiones
-    busquedas = respuestas * busquedas_por_respuesta
-    usd = 0.0
+    usd_conocido = 0.0
+    total_busquedas: int | None = 0
     por_motor = {}
+    tarifas_desconocidas = []
+    usos_desconocidos = []
     for m in motores:
         tarifa = TARIFAS_BUSQUEDA_USD.get(m)
-        b = n_prompts * repeticiones * busquedas_por_respuesta
-        costo = round(b * tarifa, 4) if tarifa else (None if tarifa is None else 0.0)
+        usos = busquedas_por_respuesta if busquedas_por_respuesta is not None else BUSQUEDAS_MAXIMAS_POR_RESPUESTA.get(m)
+        b = n_prompts * repeticiones * usos if usos is not None else None
+        if b is None:
+            usos_desconocidos.append(m)
+            total_busquedas = None
+        elif total_busquedas is not None:
+            total_busquedas += b
+        costo = round(b * tarifa, 4) if b is not None and tarifa is not None else None
+        if tarifa is None:
+            tarifas_desconocidas.append(m)
         por_motor[m] = {"busquedas": b, "usd_busquedas": costo, "nota": NOTAS_TARIFA.get(m, "")}
-        usd += costo or 0.0
+        if costo is not None:
+            usd_conocido += costo
     return {
         "respuestas": respuestas,
-        "busquedas": busquedas,
-        "usd_busquedas_maximo": round(usd, 4),
+        "busquedas": total_busquedas,
+        "usd_busquedas_conocido": round(usd_conocido, 4),
+        "usd_busquedas_maximo": None if tarifas_desconocidas or usos_desconocidos else round(usd_conocido, 4),
+        "tarifas_desconocidas": tarifas_desconocidas,
+        "usos_maximos_desconocidos": usos_desconocidos,
         "por_motor": por_motor,
-        "nota": "Estimación del costo por búsquedas web con las tarifas declaradas por cada proveedor el 2026-09-10; los tokens de entrada y salida se cobran aparte y no se estiman.",
+        "nota": "Estimación por usos máximos impuestos en la petición; Perplexity y Gemini tienen costo monetario no estimado y por eso no se informa un máximo total. Los motores sin un máximo configurado en la petición quedan marcados como desconocidos, nunca se les asigna un uso supuesto. Los tokens de entrada y salida se cobran aparte y no se estiman.",
     }

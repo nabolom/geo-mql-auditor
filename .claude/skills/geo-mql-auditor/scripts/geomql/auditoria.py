@@ -21,6 +21,14 @@ from .reglas import Regla, cargar_rulebook, indice
 from .verificaciones import CATEGORIAS_AUDIT, EvidenciaPagina, EvidenciaSitio, evaluar_pagina, evaluar_sitio
 
 TIPOS_VALIDOS = ("home", "solucion", "articulo", "comparativa", "faq", "glosario", "landing", "local", "perfil", "programa", "institucional", "otra")
+_CORRIDA_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def validar_corrida(corrida: str) -> str:
+    """Valida corrida como identificador, nunca como fragmento de ruta."""
+    if not isinstance(corrida, str) or not _CORRIDA_RE.fullmatch(corrida) or ".." in corrida:
+        raise ValueError("corrida debe ser un ID de 1–128 caracteres alfanuméricos, punto, guion o guion bajo; no se permiten rutas")
+    return corrida
 
 
 def nueva_corrida(dominio: str, ahora: datetime | None = None) -> str:
@@ -114,7 +122,7 @@ def analizar_pagina(
 def evidencia_sitio(url_base: str, *, recoleccion_sitemap: dict[str, Any] | None, descargar: Callable[..., dict[str, Any]] | None = None, idiomas_esperados: list[str] | None = None, ahora: datetime | None = None, rutas: list[str] | None = None) -> EvidenciaSitio:
     descargar = descargar or fetch.descargar
     rob = robots.cargar_robots(url_base, descargar=descargar)
-    acceso = evaluar_acceso(rob["parsed"], ruta="/")
+    acceso = evaluar_acceso(rob["parsed"], ruta="/", estado_robots=rob.get("estado", "inaccesible"))
     if rutas:
         bloqueos_por_ruta: dict[str, list[str]] = {}
         for ruta in rutas:
@@ -179,12 +187,17 @@ def correr(
     reglas_idx = indice(reglas)
     contexto = contexto or contexto_mod.cargar()
     idiomas = contexto_mod.lista(contexto.get("campos", {}), "idiomas") if contexto.get("existe") else []
+    if not urls:
+        raise ValueError("se requiere al menos una URL")
     url_base = url_base or urls[0]
     dominio = reporte.dominio_de(url_base)
-    corrida = corrida or nueva_corrida(dominio)
+    corrida = validar_corrida(corrida or nueva_corrida(dominio))
     dir_salidas = Path(dir_salidas) if dir_salidas else RUTA_SALIDAS
-    dir_tmp = dir_salidas / "tmp" / corrida
-    dir_tmp.mkdir(parents=True, exist_ok=True)
+    raiz_tmp = dir_salidas.resolve() / "tmp"
+    dir_tmp = raiz_tmp / corrida
+    if not dir_tmp.resolve().is_relative_to(raiz_tmp):
+        raise ValueError("la ruta de corrida sale de salidas/tmp")
+    dir_tmp.mkdir(parents=True, exist_ok=False)
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         paginas = list(pool.map(lambda u: analizar_pagina(u, reglas=reglas, tipo_forzado=tipo_forzado, descargar=descargar, render_fn=render_fn, resolver=resolver, idiomas_esperados=idiomas, ahora=ahora), urls))
@@ -272,16 +285,16 @@ def correr(
             resumen["nota_muestras"] = "Encabezados y párrafos del contenido principal por URL (hasta %d URL, priorizando las que fallan reglas X-*); úsalos en lugar de descargar el HTML." % MAX_URLS_MUESTRA
         resumen["hallazgos_actuales"] = [h.a_dict() for h in hallazgos if h.categoria == cat]
         ruta = dir_tmp / f"{cat}.json"
-        ruta.write_text(json.dumps(resumen, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        reporte._escribir_atomico(ruta, json.dumps(resumen, ensure_ascii=False, indent=2, default=str))
         archivos_vector[cat] = str(ruta)
     payload["meta"]["archivos_vector"] = archivos_vector
 
-    nombre = reporte.nombre_archivo(dominio, "audit", date.fromisoformat(payload["meta"]["fecha"])) + (f"_{reporte._slug(sufijo)}" if sufijo else "")
-    rutas_salida = reporte.escribir(payload, directorio=dir_salidas, nombre=nombre)
-    payload["meta"]["archivos"] = rutas_salida
-    (dir_tmp / "meta.json").write_text(json.dumps({"corrida": corrida, "dominio": dominio, "archivos": rutas_salida, "archivos_vector": archivos_vector, "fecha": payload["meta"]["fecha"]}, ensure_ascii=False, indent=2), encoding="utf-8")
+    nombre = reporte.nombre_archivo(dominio, "audit", date.fromisoformat(payload["meta"]["fecha"])) + (f"_{reporte._slug(sufijo)[:40]}" if sufijo else "")
+    rutas_salida = {"md": str(dir_salidas / f"{nombre}.md"), "json": str(dir_salidas / f"{nombre}.json")}
+    if any(Path(ruta).exists() for ruta in rutas_salida.values()):
+        raise FileExistsError(f"el reporte ya existe para esta fecha: {nombre}; proporciona un --sufijo único")
 
-    # snapshot para monitor
+    # snapshot para monitor; las rutas quedan en meta antes de serializar el JSON del reporte.
     dir_historial = Path(dir_historial) if dir_historial else RUTA_DATOS / "historial"
     dir_historial.mkdir(parents=True, exist_ok=True)
     snapshot = {
@@ -295,8 +308,12 @@ def correr(
         "urls": [{"url": r["url"], "tipo": r["tipo"], "fecha_principal": r["fecha_principal"], "antiguedad_dias": r["antiguedad_dias"]} for r in registros],
     }
     ruta_snapshot = dir_historial / reporte.nombre_snapshot(dominio, "audit", corrida, date.fromisoformat(payload["meta"]["fecha"]))
-    ruta_snapshot.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     payload["meta"]["snapshot"] = str(ruta_snapshot)
+    payload["meta"]["archivos_vector"] = archivos_vector
+    payload["meta"]["archivos"] = rutas_salida
+    reporte._escribir_atomico(ruta_snapshot, json.dumps(snapshot, ensure_ascii=False, indent=2, default=str))
+    reporte.escribir(payload, directorio=dir_salidas, nombre=nombre)
+    reporte._escribir_atomico(dir_tmp / "meta.json", json.dumps({"corrida": corrida, "dominio": dominio, "archivos": rutas_salida, "archivos_vector": archivos_vector, "fecha": payload["meta"]["fecha"], "snapshot": str(ruta_snapshot)}, ensure_ascii=False, indent=2))
     return payload
 
 
@@ -462,6 +479,8 @@ def fusionar(ruta_json_reporte: Path | str, salidas_subagentes: list[dict[str, A
     )
     nuevo["meta"].update({k: v for k, v in payload["meta"].items() if k not in nuevo["meta"]})
     nuevo["meta"]["fusion"] = {"n_rechazados": len(rechazados), "rechazados": rechazados, "vectores": [s.get("vector", "") for s in salidas_subagentes]}
-    rutas = reporte.escribir(nuevo, directorio=Path(dir_salidas) if dir_salidas else ruta_json_reporte.parent, nombre=ruta_json_reporte.stem)
+    directorio = Path(dir_salidas) if dir_salidas else ruta_json_reporte.parent
+    rutas = {"md": str(directorio / f"{ruta_json_reporte.stem}.md"), "json": str(directorio / f"{ruta_json_reporte.stem}.json")}
     nuevo["meta"]["archivos"] = rutas
+    reporte.escribir(nuevo, directorio=directorio, nombre=ruta_json_reporte.stem, sobrescribir=True)
     return nuevo

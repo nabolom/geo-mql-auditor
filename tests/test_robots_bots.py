@@ -95,6 +95,12 @@ def test_sitemap_urlset_e_indice(html_de):
     assert sitemap.parsear_sitemap("<no xml")["tipo"] == "invalido"
 
 
+def test_sitemap_con_raiz_ajena_al_protocolo_no_declara_cobertura_completa():
+    url = "https://s.mx/sitemap.xml"
+    r = sitemap.recolectar_urls(url, descargar=lambda u, **k: fetch._resultado_vacio(u, status=200, html="<html><body>not a sitemap</body></html>"))
+    assert r["cobertura_completa"] is False and "sin raíz urlset o sitemapindex" in r["errores"][0]
+
+
 def test_recolectar_sigue_indices_y_limita(html_de):
     docs = {
         "https://s.mx/sitemap.xml": html_de("sitemap_index.xml"),

@@ -21,12 +21,17 @@ def cargar_registro(ruta: Path | str | None = None) -> dict[str, Any]:
     return json.loads(ruta.read_text(encoding="utf-8"))
 
 
-def evaluar_acceso(robots_parsed: dict[str, Any], *, ruta: str = "/", registro: dict[str, Any] | None = None) -> dict[str, Any]:
+def evaluar_acceso(robots_parsed: dict[str, Any], *, ruta: str = "/", registro: dict[str, Any] | None = None, estado_robots: str = "ok") -> dict[str, Any]:
     """Para cada bot documentado, si robots.txt le permite la ruta dada."""
     registro = registro or cargar_registro()
     por_categoria: dict[str, list[dict[str, Any]]] = {c: [] for c in CATEGORIAS}
     for bot in registro["bots"]:
-        res = permitido(robots_parsed, bot["token"], ruta)
+        if estado_robots == "error_servidor":
+            res = {"permitido": False, "regla": None, "grupo": None, "motivo": "error 5xx: acceso asumido bloqueado"}
+        elif estado_robots not in ("ok", "no_existe"):
+            res = {"permitido": None, "regla": None, "grupo": None, "motivo": "robots.txt inaccesible"}
+        else:
+            res = permitido(robots_parsed, bot["token"], ruta)
         por_categoria.setdefault(bot["categoria"], []).append({
             "token": bot["token"],
             "proveedor": bot["proveedor"],
@@ -41,13 +46,16 @@ def evaluar_acceso(robots_parsed: dict[str, Any], *, ruta: str = "/", registro: 
             "nota": bot.get("nota", ""),
         })
     resumen = {
-        f"{cat}_bloqueados": [b["token"] for b in lista if not b["permitido"]]
+        f"{cat}_bloqueados": [b["token"] for b in lista if b["permitido"] is False]
         for cat, lista in por_categoria.items()
     }
+    resumen.update({f"{cat}_sin_evidencia": [b["token"] for b in lista if b["permitido"] is None] for cat, lista in por_categoria.items()})
     resumen["busqueda_total"] = len(por_categoria["busqueda"])
+    resumen["usuario_total"] = len(por_categoria["usuario"])
     resumen["entrenamiento_total"] = len(por_categoria["entrenamiento"])
     resumen["politica_entrenamiento"] = (
-        "bloquea_todo" if resumen["entrenamiento_bloqueados"] and len(resumen["entrenamiento_bloqueados"]) == len(por_categoria["entrenamiento"])
+        "sin_evidencia" if resumen["entrenamiento_sin_evidencia"]
+        else "bloquea_todo" if resumen["entrenamiento_bloqueados"] and len(resumen["entrenamiento_bloqueados"]) == len(por_categoria["entrenamiento"])
         else "permite_todo" if not resumen["entrenamiento_bloqueados"]
         else "mixta"
     )
