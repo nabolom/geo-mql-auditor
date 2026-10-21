@@ -32,55 +32,38 @@ Los colectores reportan lo que observaron; los juicios de subagentes se etiqueta
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, ui-sans-serif, system-ui","primaryTextColor":"#172033","lineColor":"#718096","tertiaryColor":"#F4F7FB"}}}%%
 flowchart TB
-  subgraph ENTRADAS["01 · Entradas"]
-    direction TB
-    Sitio["Sitio web<br/>URL · lista · sitemap"]
-    Contexto["Contexto de negocio<br/>marca · mercado · audiencia"]
-    Panel["Panel de prompts<br/>preguntas acordadas"]
+  IN["ENTRADAS<br/>Sitio · contexto · prompts"]
+
+  subgraph AUDIT["01 · Auditoría AEO/GEO"]
+    direction LR
+    FETCH["Lectura segura<br/>HTTP(S) · límites"] --> COLLECT["Colectores<br/>HTML · robots · sitemap · JSON-LD"] --> CHECK["Evaluación de reglas<br/>rulebook · evidencia"]
   end
 
-  subgraph AUDIT["02 · Auditoría AEO/GEO"]
-    direction TB
-    Fetch["Fetch seguro<br/>HTTP(S) · redirects · límites"]
-    Colectores["Colectores deterministas<br/>HTML · robots · sitemap · JSON-LD"]
-    Rulebook["Rulebook<br/>73 reglas · fuentes · evidencia"]
-    Verificar["Verificadores<br/>pasa · falla · no aplica · sin evidencia"]
-    Sitio --> Fetch --> Colectores --> Verificar
-    Rulebook --> Verificar
+  subgraph VIS["02 · Visibilidad de marca"]
+    direction LR
+    CAPTURE["Captura<br/>manual o API"] --> ENGINES["Motores<br/>ChatGPT · Claude · Gemini · Perplexity"] --> METRICS["Métricas<br/>menciones · citas · variabilidad"]
   end
 
-  subgraph VISIBILIDAD["03 · Medición de visibilidad"]
-    direction TB
-    Captura["Captura manual<br/>o consulta por API"]
-    Motores["ChatGPT · Claude<br/>Perplexity · Gemini"]
-    Metricas["Métricas por corrida<br/>menciones · citas · variabilidad"]
-    Panel --> Captura
-    Captura --> Motores --> Metricas
-  end
+  IN --> FETCH
+  IN --> CAPTURE
+  COLLECT --> VECTORS["Vectores JSON"] --> AGENT["Subagentes<br/>juicios = hipótesis"]
+  CHECK --> REPORT["SALIDA<br/>Informe Markdown + JSON<br/>evidencia · hallazgos · prioridades"]
+  AGENT --> REPORT
+  METRICS --> REPORT
 
-  Contexto --> Verificar
-  Contexto --> Panel
-  Verificar --> Reportes["Informes Markdown + JSON<br/>evidencia y prioridades"]
-  Metricas --> Reportes
-  Colectores --> Vectores["Vectores JSON"] --> Subagentes["Subagentes<br/>juicio etiquetado como Hipótesis"] --> Reportes
-
-  subgraph FUERA["Fuera del alcance actual"]
-    MQL["MQL · CRM · pipeline<br/>no implementados"]
-  end
-
-  classDef input fill:#EAF2FF,stroke:#3973C6,color:#172033,stroke-width:1.5px
-  classDef collect fill:#E8F7F1,stroke:#21856B,color:#172033,stroke-width:1.5px
-  classDef rules fill:#FFF4DB,stroke:#C4861A,color:#172033,stroke-width:1.5px
+  classDef input fill:#EAF2FF,stroke:#3973C6,color:#172033,stroke-width:2px
+  classDef audit fill:#E8F7F1,stroke:#21856B,color:#172033,stroke-width:1.5px
+  classDef rule fill:#FFF4DB,stroke:#C4861A,color:#172033,stroke-width:1.5px
   classDef visibility fill:#F1EAFF,stroke:#7952B3,color:#172033,stroke-width:1.5px
+  classDef review fill:#F4F0FF,stroke:#7952B3,color:#172033,stroke-dasharray:5 5
   classDef output fill:#E8F0FE,stroke:#3157A4,color:#172033,stroke-width:2px
-  classDef outscope fill:#F3F4F6,stroke:#9AA3AF,color:#697386,stroke-dasharray:5 5
 
-  class Sitio,Contexto,Panel input
-  class Fetch,Colectores collect
-  class Rulebook,Verificar rules
-  class Captura,Motores,Metricas visibility
-  class Reportes,Vectores,Subagentes output
-  class MQL outscope
+  class IN input
+  class FETCH,COLLECT audit
+  class CHECK rule
+  class CAPTURE,ENGINES,METRICS visibility
+  class VECTORS,AGENT review
+  class REPORT output
 ```
 
 ### Componentes disponibles
